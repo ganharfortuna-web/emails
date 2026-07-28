@@ -1,7 +1,20 @@
+"use client"
+
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Send, Users, FileText, Bot, LogOut } from 'lucide-react'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  // Essa ferramenta descobre em qual URL nós estamos agora
+  const pathname = usePathname()
+
+  // Função para saber se o link deve ficar azul (ativo) ou não
+  const linkAtivo = (caminho: string) => {
+    return pathname === caminho
+      ? "flex items-center gap-3 bg-blue-900/50 text-white px-4 py-3 rounded-lg transition-colors" // Estilo quando está selecionado
+      : "flex items-center gap-3 text-slate-400 hover:bg-slate-900 hover:text-white px-4 py-3 rounded-lg transition-colors" // Estilo normal
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans text-slate-900">
       
@@ -12,23 +25,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          <Link href="/dashboard" className="flex items-center gap-3 bg-blue-900/50 text-white px-4 py-3 rounded-lg transition-colors">
+          <Link href="/dashboard" className={linkAtivo("/dashboard")}>
             <LayoutDashboard className="size-5" />
             Visão Geral
           </Link>
-          <Link href="/dashboard/contas" className="flex items-center gap-3 hover:bg-slate-900 hover:text-white px-4 py-3 rounded-lg transition-colors">
+          <Link href="/dashboard/contas" className={linkAtivo("/dashboard/contas")}>
             <Send className="size-5" />
             Contas de Envio
           </Link>
-          <Link href="/dashboard/listas" className="flex items-center gap-3 hover:bg-slate-900 hover:text-white px-4 py-3 rounded-lg transition-colors">
+          <Link href="/dashboard/listas" className={linkAtivo("/dashboard/listas")}>
             <Users className="size-5" />
             Gestão de Listas
           </Link>
-          <Link href="/dashboard/paginas" className="flex items-center gap-3 hover:bg-slate-900 hover:text-white px-4 py-3 rounded-lg transition-colors">
+          <Link href="/dashboard/paginas" className={linkAtivo("/dashboard/paginas")}>
             <FileText className="size-5" />
             Landing Pages
           </Link>
-          <Link href="/dashboard/automacoes" className="flex items-center gap-3 hover:bg-slate-900 hover:text-white px-4 py-3 rounded-lg transition-colors">
+          <Link href="/dashboard/automacoes" className={linkAtivo("/dashboard/automacoes")}>
             <Bot className="size-5" />
             Respostas Automáticas
           </Link>
