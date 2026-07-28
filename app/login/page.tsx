@@ -5,7 +5,6 @@ import { Mail, Lock, ArrowRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 
-// Conectando com as variáveis secretas que salvamos
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -22,19 +21,18 @@ export default function LoginPage() {
     setCarregando(true)
     setErro('')
 
-    // Tentativa de login real no Supabase
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email,
       password: senha,
     })
 
     if (error) {
-      setErro('E-mail ou senha incorretos. Acesso negado.')
+      // Aqui está o nosso "espião" ativado
+      setErro(`Erro Supabase: ${error.message}`)
       setCarregando(false)
       return
     }
 
-    // Se a senha estiver correta no banco de dados, libera o acesso
     router.push('/dashboard')
   }
 
@@ -53,9 +51,8 @@ export default function LoginPage() {
         <div className="p-8">
           <form onSubmit={fazerLogin} className="space-y-6">
             
-            {/* Alerta de Erro de Segurança */}
             {erro && (
-              <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 text-center font-bold">
+              <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 text-center font-bold break-words">
                 {erro}
               </div>
             )}
