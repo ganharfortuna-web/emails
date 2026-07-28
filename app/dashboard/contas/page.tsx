@@ -77,7 +77,7 @@ export default function ContasPage() {
               {/* Tipo de Conexão */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Tipo de Conexão</label>
-                <select className="w-full border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-700">
+                <select className="w-full bg-white border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-900">
                   <option>Gmail (App Passwords)</option>
                   <option>SMTP Externo (AWS, SendGrid, etc)</option>
                 </select>
@@ -86,25 +86,25 @@ export default function ContasPage() {
               {/* Email */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Endereço de E-mail</label>
-                <input type="email" placeholder="exemplo@gmail.com" className="w-full border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-700" />
+                <input type="email" placeholder="exemplo@gmail.com" className="w-full bg-white border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400" />
               </div>
 
               {/* Senha */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Senha de Aplicativo (ou Senha SMTP)</label>
-                <input type="password" placeholder="••••••••••••" className="w-full border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-700" />
+                <input type="password" placeholder="••••••••••••" className="w-full bg-white border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400" />
               </div>
 
               {/* Limites de Segurança */}
               <div className="grid grid-cols-2 gap-4 pt-2">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Limite Diário</label>
-                  <input type="number" placeholder="Ex: 50" className="w-full border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-700" />
+                  <input type="number" placeholder="Ex: 50" className="w-full bg-white border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400" />
                   <span className="text-xs text-slate-500 mt-1.5 block font-medium">Qtd. máx de e-mails/dia</span>
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Intervalo (Segundos)</label>
-                  <input type="number" placeholder="Ex: 90" className="w-full border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-700" />
+                  <input type="number" placeholder="Ex: 90" className="w-full bg-white border border-slate-200 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400" />
                   <span className="text-xs text-slate-500 mt-1.5 block font-medium">Espera entre cada disparo</span>
                 </div>
               </div>
