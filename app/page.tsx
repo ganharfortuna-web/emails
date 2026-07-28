@@ -1,126 +1,153 @@
-import Link from 'next/link';
+'use client'
 
-const benefits = [
-  'Gmails rotativos com alternância automática para preservar reputação e alcance.',
-  'SMTP externo configurado para performance de entrega e escalabilidade.',
-  'Painel completo para campanhas, listas, landing pages e automações.',
-];
+import Link from 'next/link'
+import { Mail, Server, ShieldCheck, CheckCircle2, ArrowRight } from 'lucide-react'
 
-export default function HomePage() {
+export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_38%),linear-gradient(135deg,_#020817_0%,_#07111f_100%)] text-slate-100">
-      <section className="mx-auto flex max-w-7xl flex-col gap-12 px-6 py-16 lg:px-8 lg:py-24">
-        <header className="flex flex-wrap items-center justify-between gap-4 rounded-full border border-slate-800/80 bg-slate-950/70 px-6 py-4 backdrop-blur">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Email OS</p>
-            <p className="text-xs text-slate-400">Sistema de disparo e automação</p>
-          </div>
-          <Link
-            href="/dashboard"
-            className="rounded-full bg-orange-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-600"
+    <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-orange-200">
+      
+      {/* HERO SECTION */}
+      <section className="bg-slate-950 text-white py-24 md:py-32 px-4">
+        <div className="max-w-4xl mx-auto text-center">
+          <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white mb-6">
+            Liberdade das mensalidades abusivas de e-mail marketing
+          </h1>
+          
+          <p className="text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
+            Tenha sua própria infraestrutura de envios com alta taxa de entrega, pague apenas uma vez pela licença e nunca mais fique refém de planos mensais que limitam o seu crescimento.
+          </p>
+          
+          <Link 
+            href="#oferta"
+            className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold text-lg py-4 px-8 rounded-lg transition-colors shadow-lg shadow-orange-500/20"
           >
-            Acessar painel
+            Quero meu sistema próprio
+            <ArrowRight className="size-5" />
           </Link>
-        </header>
+        </div>
+      </section>
 
-        <div className="grid items-center gap-10 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="space-y-6">
-            <div className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-sm font-medium text-sky-300">
-              Liberdade das mensalidades abusivas de e-mail marketing
-            </div>
-            <h1 className="max-w-3xl text-4xl font-black leading-tight text-white sm:text-5xl lg:text-6xl">
-              Um sistema próprio para disparar com autoridade, escala e alta entrega.
-            </h1>
-            <p className="max-w-2xl text-lg leading-8 text-slate-300">
-              Conquiste mais alcance com rotas inteligentes de envio, automações profissionais e um painel completo para crescer sem depender de plataformas caras.
+      {/* BENEFÍCIOS SECTION */}
+      <section className="py-24 bg-slate-50 px-4 border-b border-slate-200">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-6">
+              Tecnologia de ponta para sua operação
+            </h2>
+            
+            <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+              Desenvolvido para empreendedores que precisam de escala, controle absoluto e garantia de que a mensagem chegará na caixa de entrada.
             </p>
-            <div className="flex flex-wrap gap-4">
-              <Link
-                href="#contato"
-                className="rounded-full bg-orange-500 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-600"
-              >
-                Quero meu sistema próprio
-              </Link>
-              <a
-                href="https://wa.me/5561982096982"
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-full border border-slate-700 bg-slate-900/70 px-6 py-3.5 text-base font-semibold text-slate-100 transition hover:border-sky-400 hover:text-sky-300"
-              >
-                Falar no WhatsApp
-              </a>
-            </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-8 shadow-2xl shadow-black/30">
-            <div className="space-y-4">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-400">Oferta completa</p>
-              <p className="text-3xl font-bold text-white">R$ 1.497,00</p>
-              <p className="text-sm leading-7 text-slate-400">
-                Pagamento único pela instalação e licença. O cliente recebe o sistema 100% completo e instalado.
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+              <div className="bg-blue-900/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                <Mail className="size-7 text-blue-900" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-4">
+                Gmails Rotativos
+              </h3>
+              <p className="text-slate-600">
+                Cadastre múltiplas contas do Gmail utilizando App Passwords. O sistema rotaciona os envios automaticamente para proteger sua reputação.
               </p>
             </div>
-            <div className="mt-6 space-y-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              {benefits.map((item) => (
-                <div key={item} className="flex gap-3">
-                  <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                  <p className="text-sm leading-7 text-slate-300">{item}</p>
-                </div>
-              ))}
+
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+              <div className="bg-blue-900/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                <Server className="size-7 text-blue-900" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-4">
+                SMTP Externo
+              </h3>
+              <p className="text-slate-600">
+                Precisa de envio em massa pesado? Conecte servidores SMTP externos e gerencie toda a entrega diretamente do seu painel.
+              </p>
+            </div>
+
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+              <div className="bg-emerald-100 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                <ShieldCheck className="size-7 text-emerald-700" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-4">
+                Alta Taxa de Entrega
+              </h3>
+              <p className="text-slate-600">
+                Limpeza inteligente de listas e algoritmos de proteção garantem que seus e-mails cheguem na aba principal dos seus leads.
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 pb-16 lg:px-8">
-        <div className="grid gap-6 rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8 lg:grid-cols-3 lg:p-10">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-400">Entrega</p>
-            <h2 className="mt-3 text-xl font-semibold text-white">Gmails rotativos e SMTP externo</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Estrutura pensada para garantir alta taxa de entrega e reduzir bloqueios com rotação inteligente.
+      {/* OFERTA / PREÇO SECTION */}
+      <section id="oferta" className="py-24 px-4 bg-white">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-blue-950 rounded-3xl p-8 md:p-16 text-center text-white shadow-2xl relative overflow-hidden">
+            <h2 className="text-3xl md:text-5xl font-black mb-6">
+              Acesso Vitalício ao Sistema
+            </h2>
+            
+            <p className="text-blue-200 text-lg mb-10 max-w-xl mx-auto">
+              Chega de pagar mensalidades caras. Adquira a licença do software, receba a instalação completa e tenha controle total dos seus dados.
             </p>
-          </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-400">Automação</p>
-            <h2 className="mt-3 text-xl font-semibold text-white">Campanhas, listas e landing pages</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Controle total desde o cadastro de contatos até a geração de páginas de captura e respostas automáticas.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-400">Escalabilidade</p>
-            <h2 className="mt-3 text-xl font-semibold text-white">Plataforma profissional</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              Pronto para operar com múltiplas contas, listas segmentadas e pipelines de conversão com foco comercial.
-            </p>
+
+            <div className="bg-white/10 rounded-2xl p-8 inline-block mb-10 border border-white/20">
+              <span className="block text-blue-200 text-sm font-bold uppercase tracking-wider mb-2">Investimento Único</span>
+              <span className="text-5xl font-black text-white">R$ 1.497,00</span>
+              <span className="block text-sm text-blue-200 mt-2">(Pagamento Único pela Instalação e Licença)</span>
+            </div>
+
+            <ul className="text-left max-w-sm mx-auto space-y-4 mb-10">
+              <li className="flex items-center gap-3 text-blue-50">
+                <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
+                Sistema 100% completo e instalado
+              </li>
+              <li className="flex items-center gap-3 text-blue-50">
+                <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
+                Painel Admin e Automações
+              </li>
+              <li className="flex items-center gap-3 text-blue-50">
+                <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
+                Criador de Landing Pages integrado
+              </li>
+            </ul>
+
+            <Link 
+              href="https://wa.me/5561982096982?text=Ola!%20Gostaria%20de%20contratar%20o%20sistema%20de%20email%20marketing%20proprio."
+              target="_blank"
+              className="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xl py-5 px-10 rounded-xl transition-all shadow-lg hover:shadow-orange-500/30 hover:-translate-y-1 w-full sm:w-auto justify-center"
+            >
+              Falar no WhatsApp para Contratar
+            </Link>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 pb-16 lg:px-8">
-        <div className="rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8 lg:p-10">
-          <h2 className="text-2xl font-semibold text-white">Sobre o desenvolvedor</h2>
-          <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">
+      {/* SOBRE O DESENVOLVEDOR & RODAPÉ */}
+      <footer className="bg-slate-950 text-slate-400 py-16 px-4 text-center border-t border-slate-900">
+        <div className="max-w-2xl mx-auto">
+          <h2 className="text-xl font-bold text-white mb-6">
+            Sobre o Desenvolvedor
+          </h2>
+          
+          <p className="leading-relaxed mb-12 text-slate-300">
             Desenvolvido por Jose Valderi, programador e empreendedor digital com diversos projetos lançados com sucesso no mercado. Construindo soluções reais para escalar o seu negócio.
           </p>
-        </div>
-      </section>
 
-      <footer id="contato" className="border-t border-slate-800 bg-slate-950/80">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-10 text-center lg:px-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Fechamento de contratação</p>
-          <h2 className="text-3xl font-semibold text-white">Pronto para ter um sistema próprio e profissional?</h2>
-          <a
-            href="https://wa.me/5561982096982"
-            target="_blank"
-            rel="noreferrer"
-            className="mx-auto rounded-full bg-orange-500 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-orange-600"
-          >
-            Fale agora pelo WhatsApp (61) 98209-6982
-          </a>
+          <div className="border-t border-slate-800 pt-8">
+            <h3 className="text-white font-bold mb-6">Dúvidas? Fale diretamente comigo:</h3>
+            <Link 
+              href="https://wa.me/5561982096982"
+              target="_blank"
+              className="inline-block bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+            >
+              WhatsApp: (61) 98209-6982
+            </Link>
+          </div>
         </div>
       </footer>
-    </main>
-  );
+    </div>
+  )
 }
