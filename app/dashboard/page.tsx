@@ -1,122 +1,88 @@
-const metrics = [
-  { label: 'E-mails enviados hoje', value: '12.480', detail: '+18% em relação a ontem' },
-  { label: 'Taxa de abertura', value: '68.4%', detail: 'Média consolidada' },
-  { label: 'Cliques no relatório', value: '3.120', detail: 'Últimas 24 horas' },
-];
+import { MailCheck, MousePointerClick, AlertCircle } from 'lucide-react'
 
-const accounts = [
-  { name: 'Gmail Marketing 01', status: 'Ativo', rotation: 'Rotação automática' },
-  { name: 'SMTP Corporativo', status: 'Em validação', rotation: 'Fallback pronto' },
-];
-
-const lists = [
-  { name: 'Leads Quentes', size: '4.280 contatos', health: 'Limpeza inteligente ativa' },
-  { name: 'Clientes Ativos', size: '1.120 contatos', health: 'Sem inatividade há 30 dias' },
-];
-
-export default function DashboardPage() {
+export default function DashboardOverview() {
   return (
-    <div className="space-y-8">
-      <header className="flex flex-col gap-4 rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8 shadow-2xl shadow-black/20 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Visão Geral</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">Campanhas, contas e automações em um só painel</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
-            Estrutura profissional para gerenciar disparos, listas, páginas de captura e respostas automáticas com controle completo.
-          </p>
-        </div>
-        <button className="rounded-full bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600">
-          Nova campanha
-        </button>
-      </header>
-
-      <section className="grid gap-4 lg:grid-cols-3">
-        {metrics.map((metric) => (
-          <div key={metric.label} className="rounded-[1.5rem] border border-slate-800 bg-slate-950/80 p-6">
-            <p className="text-sm text-slate-400">{metric.label}</p>
-            <p className="mt-4 text-3xl font-semibold text-white">{metric.value}</p>
-            <p className="mt-2 text-sm text-emerald-400">{metric.detail}</p>
-          </div>
-        ))}
-      </section>
-
-      <section id="accounts" className="rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Contas de envio</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Múltiplos provedores com rotação automática</h2>
-          </div>
-          <button className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600">
-            Adicionar conta
-          </button>
-        </div>
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
-          {accounts.map((account) => (
-            <div key={account.name} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-semibold text-white">{account.name}</h3>
-                <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-sm text-emerald-300">
-                  {account.status}
-                </span>
-              </div>
-              <p className="mt-4 text-sm leading-7 text-slate-400">{account.rotation}</p>
+    <div className="max-w-6xl mx-auto">
+      
+      <h2 className="text-3xl font-black text-slate-900">
+        Visão Geral das Métricas
+      </h2>
+      
+      <br />
+      
+      <p className="text-lg text-slate-600 mb-10">
+        Acompanhe o desempenho diário das suas campanhas e a saúde da sua infraestrutura de envios.
+      </p>
+      
+      {/* CARDS DE MÉTRICAS */}
+      <div className="grid md:grid-cols-3 gap-6 mb-12">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-slate-600">E-mails Enviados Hoje</h3>
+            <div className="bg-blue-100 p-3 rounded-xl">
+              <MailCheck className="size-6 text-blue-700" />
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section id="lists" className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Gestão de listas</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Listas com segmentação inteligente</h2>
-          <div className="mt-6 space-y-3">
-            {lists.map((list) => (
-              <div key={list.name} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-semibold text-white">{list.name}</h3>
-                  <span className="text-sm text-sky-300">{list.size}</span>
-                </div>
-                <p className="mt-2 text-sm leading-7 text-slate-400">{list.health}</p>
-              </div>
-            ))}
           </div>
+          <p className="text-4xl font-black text-slate-900">12.450</p>
+          <p className="text-sm text-emerald-600 mt-2 font-bold">+15% em relação a ontem</p>
         </div>
 
-        <div className="rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Limpeza inteligente</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Remoção por inatividade</h2>
-          <div className="mt-6 space-y-3 text-sm text-slate-300">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">Filtrar contatos sem clique há 1 mês</div>
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">Filtrar contatos sem clique há 2 meses</div>
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">Filtrar contatos sem clique há 3 meses</div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-slate-600">Taxa de Abertura Média</h3>
+            <div className="bg-emerald-100 p-3 rounded-xl">
+              <MousePointerClick className="size-6 text-emerald-700" />
+            </div>
           </div>
+          <p className="text-4xl font-black text-slate-900">28.4%</p>
+          <p className="text-sm text-emerald-600 mt-2 font-bold">Saudável - Acima da média</p>
         </div>
-      </section>
 
-      <section id="pages" className="rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Criador de landing pages</p>
-        <h2 className="mt-2 text-2xl font-semibold text-white">Páginas de captura com links e encurtamento</h2>
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">Título</p>
-            <p className="mt-2 text-lg font-semibold text-white">Receba um material premium</p>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-slate-600">Avisos do Sistema</h3>
+            <div className="bg-orange-100 p-3 rounded-xl">
+              <AlertCircle className="size-6 text-orange-600" />
+            </div>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-sm text-slate-400">Link da lista</p>
-            <p className="mt-2 text-lg font-semibold text-white">https://lista.exemplo.com</p>
-          </div>
+          <p className="text-4xl font-black text-slate-900">2</p>
+          <p className="text-sm text-orange-600 mt-2 font-bold">Gmails precisam de reconexão</p>
         </div>
-      </section>
+      </div>
 
-      <section id="automation" className="rounded-[2rem] border border-slate-800 bg-slate-950/70 p-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-400">Respostas automáticas</p>
-        <h2 className="mt-2 text-2xl font-semibold text-white">Autoreponder diário com duração de 1 mês</h2>
-        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-          <p className="text-sm leading-7 text-slate-400">
-            Configure mensagens automáticas para nutrir leads, reforçar ofertas e manter comunicação ativa no período ideal.
-          </p>
+      {/* RELATÓRIO DE CLIQUES */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
+        <h3 className="text-xl font-bold text-slate-900">
+          Relatório Rápido de Cliques
+        </h3>
+        
+        <br />
+        
+        <p className="text-slate-600 mb-8">
+          Acompanhe quais foram os links mais clicados nas suas últimas campanhas de disparo.
+        </p>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-4 border-b border-slate-100">
+            <span className="text-slate-700 font-bold">Link: /promocao-vitalicia</span>
+            <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
+              342 cliques
+            </span>
+          </div>
+          <div className="flex items-center justify-between py-4 border-b border-slate-100">
+            <span className="text-slate-700 font-bold">Link: /video-apresentacao</span>
+            <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
+              128 cliques
+            </span>
+          </div>
+          <div className="flex items-center justify-between py-4">
+            <span className="text-slate-700 font-bold">Link: /checkout</span>
+            <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
+              89 cliques
+            </span>
+          </div>
         </div>
-      </section>
+      </div>
     </div>
-  );
+  )
 }
