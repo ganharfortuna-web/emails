@@ -21,19 +21,24 @@ export default function LoginPage() {
     setCarregando(true)
     setErro('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: senha,
-    })
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: senha,
+      })
 
-    if (error) {
-      // Aqui está o nosso "espião" ativado
-      setErro(`Erro Supabase: ${error.message}`)
+      if (error) {
+        // AQUI ESTÁ A MUDANÇA: Agora o sistema vai imprimir o erro exato (em inglês) do Supabase
+        setErro(`Erro do Supabase: ${error.message}`)
+        setCarregando(false)
+        return
+      }
+
+      router.push('/dashboard')
+    } catch (err: any) {
+      setErro(`Erro de conexão: ${err.message}`)
       setCarregando(false)
-      return
     }
-
-    router.push('/dashboard')
   }
 
   return (
