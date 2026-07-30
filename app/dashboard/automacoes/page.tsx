@@ -5,11 +5,9 @@ import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass } from 'lucide-re
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
-// TRUQUE NINJA 1: Silencia o aviso de falta de tipagem do CSS
 // @ts-ignore
 import 'react-quill/dist/quill.snow.css'
 
-// TRUQUE NINJA 2: Importa o Quill ignorando a falta do pacote @types
 const ReactQuill = dynamic(() => {
   // @ts-ignore
   return import('react-quill')
@@ -22,14 +20,18 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// Configuração dos botões que vão aparecer na barrinha do seu "Word"
+// 🚀 O ARSENAL DE FORMATAÇÃO COMPLETO
 const modulosEditor = {
   toolbar: [
-    [{ 'header': [1, 2, 3, false] }], 
-    ['bold', 'italic', 'underline'],
-    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-    ['link'],
-    ['clean'] 
+    [{ 'font': [] }], // Família da Fonte
+    [{ 'size': ['small', false, 'large', 'huge'] }], // Tamanho
+    [{ 'header': [1, 2, 3, false] }], // Títulos
+    ['bold', 'italic', 'underline', 'strike'], // Estilos Base
+    [{ 'color': [] }, { 'background': [] }], // Cores do Texto e Fundo
+    [{ 'align': [] }], // Alinhamento (Esquerda, Centro, Direita, Justificado)
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }], // Listas
+    ['link'], // Inserir Link
+    ['clean'] // Vassourinha (Limpar formatação)
   ],
 }
 
@@ -38,7 +40,6 @@ export default function AutomacoesPage() {
   const [campanhas, setCampanhas] = useState<any[]>([]) 
   const [carregandoHistorico, setCarregandoHistorico] = useState(true)
   
-  // Estados do Formulário de Disparo
   const [listaSelecionada, setListaSelecionada] = useState('')
   const [assunto, setAssunto] = useState('')
   const [mensagem, setMensagem] = useState('') 
@@ -69,7 +70,6 @@ export default function AutomacoesPage() {
   const prepararDisparo = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // O React Quill quando está vazio deixa um <p><br></p>, então validamos isso
     const mensagemVazia = mensagem.replace(/<[^>]*>?/gm, '').trim().length === 0
 
     if (!listaSelecionada || !assunto || mensagemVazia) {
@@ -119,9 +119,9 @@ export default function AutomacoesPage() {
         
         {/* ÁREA ESQUERDA: EDITOR DE E-MAIL */}
         <div className="lg:col-span-2">
-          <form onSubmit={prepararDisparo} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+          <form onSubmit={prepararDisparo} className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col relative z-10">
             
-            <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-center gap-3 rounded-t-2xl">
               <div className="bg-blue-100 p-2 rounded-lg text-blue-700">
                 <Mail className="size-5" />
               </div>
@@ -159,11 +159,22 @@ export default function AutomacoesPage() {
                 />
               </div>
 
-              {/* EDITOR VISUAL ESTILO WORD */}
+              {/* EDITOR VISUAL TURBINADO */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
                 
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base">
+                {/* 
+                  ATENÇÃO: Abaixo está o CSS injetado direto no Tailwind para consertar 
+                  a caixinha preta feia do Link e dar espaço pro texto respirar.
+                */}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-visible
+                  [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
+                  [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
+                  [&_.ql-editor]:min-h-[350px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base
+                  [&_.ql-tooltip]:!absolute [&_.ql-tooltip]:!bg-white [&_.ql-tooltip]:!border [&_.ql-tooltip]:!border-slate-200 [&_.ql-tooltip]:!shadow-xl [&_.ql-tooltip]:!rounded-xl [&_.ql-tooltip]:!p-4 [&_.ql-tooltip]:!z-50 [&_.ql-tooltip]:!transform [&_.ql-tooltip]:!-translate-y-2
+                  [&_.ql-tooltip_input]:!border [&_.ql-tooltip_input]:!border-slate-300 [&_.ql-tooltip_input]:!rounded-md [&_.ql-tooltip_input]:!px-3 [&_.ql-tooltip_input]:!py-1.5 [&_.ql-tooltip_input]:!text-sm [&_.ql-tooltip_input]:!text-slate-700 [&_.ql-tooltip_input]:focus:!outline-none [&_.ql-tooltip_input]:focus:!border-blue-500 [&_.ql-tooltip_input]:focus:!ring-1 [&_.ql-tooltip_input]:focus:!ring-blue-500
+                  [&_.ql-tooltip_a]:!text-blue-600 [&_.ql-tooltip_a]:!font-bold [&_.ql-tooltip_a]:!ml-2 [&_.ql-tooltip_a]:hover:!underline
+                ">
                   <ReactQuill 
                     theme="snow"
                     value={mensagem}
@@ -176,7 +187,7 @@ export default function AutomacoesPage() {
 
             </div>
 
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between mt-auto">
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between rounded-b-2xl mt-auto">
               <p className="text-xs text-slate-500 font-medium hidden sm:block">
                 Revise sua mensagem antes de salvar a campanha.
               </p>
