@@ -73,35 +73,45 @@ export default function ListasPage() {
     if (!textoImportacao.trim() || !modalImportacao.listaId) return
     setImportando(true)
 
-    // Separa o texto por quebras de linha e remove os espaços vazios
-    const linhas = textoImportacao.split('\n').map(l => l.trim()).filter(l => l !== '')
+    const linhas = textoImportacao.split('\n')
     
-    const novosContatos = linhas.map(linha => {
-      const isEmail = linha.includes('@')
-      return {
-        nome: 'Lead Importado', // Por padrão, salva como lead importado
-        email: isEmail ? linha : `sem-email-${Math.random().toString(36).substring(2,8)}@importado.com`,
-        lista_id: modalImportacao.listaId // Vincula o lead à lista exata que você escolheu
+    // O Ácido: Essa fórmula acha APENAS o e-mail e derrete o resto (vírgulas, espaços, etc)
+    const regexEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/
+
+    const novosContatos = []
+    const emailsJaAdicionados = new Set() // Garante que não suba e-mails repetidos no mesmo texto
+
+    for (const linha of linhas) {
+      const match = linha.match(regexEmail)
+      if (match) {
+        const emailLimpo = match[0].toLowerCase()
+        if (!emailsJaAdicionados.has(emailLimpo)) {
+          emailsJaAdicionados.add(emailLimpo)
+          novosContatos.push({
+            nome: 'Lead Importado', 
+            email: emailLimpo,
+            lista_id: modalImportacao.listaId 
+          })
+        }
       }
-    })
+    }
 
     if (novosContatos.length === 0) {
-      alert('Nenhum dado válido encontrado para importar.')
+      alert('Nenhum e-mail válido foi encontrado nesse texto para importar.')
       setImportando(false)
       return
     }
 
-    // Insere todos os contatos de uma vez só no banco de dados!
     const { error } = await supabase.from('contatos').insert(novosContatos)
 
     if (error) {
-      alert('Erro ao importar contatos.')
+      alert('Erro ao importar. O banco de dados recusou.')
       console.error(error)
     } else {
-      alert(`${novosContatos.length} contatos importados com sucesso!`)
+      alert(`🎉 Sucesso! ${novosContatos.length} e-mails puros foram importados!`)
       setModalImportacao({ aberto: false, listaId: null, listaNome: '' })
       setTextoImportacao('')
-      buscarListas() // Recarrega a tabela para atualizar a contagem de Leads
+      buscarListas() 
     }
     
     setImportando(false)

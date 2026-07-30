@@ -1,10 +1,9 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Plus, Search, Trash2, Loader2, UserCircle, Filter } from 'lucide-react'
+import { Plus, Search, Trash2, Loader2, UserCircle, Filter, Eraser, ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
-// Inicialização do Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
@@ -14,21 +13,33 @@ export default function ContatosPage() {
   const [listas, setListas] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
   
-  // Filtros e Buscas
+  // PAGINAÇÃO
+  const [pagina, setPagina] = useState(1)
+  const [totalContatos, setTotalContatos] = useState(0)
+  const itensPorPagina = 50
+
   const [busca, setBusca] = useState('')
   const [filtroLista, setFiltroLista] = useState('todas')
 
-  // Modal de Adicionar Contato Manual
   const [modalAberto, setModalAberto] = useState(false)
   const [novoNome, setNovoNome] = useState('')
   const [novoEmail, setNovoEmail] = useState('')
   const [novaListaId, setNovaListaId] = useState('')
   const [salvando, setSalvando] = useState(false)
 
+  // MODAL LIMPEZA DE FRIOS
+  const [modalLimpeza, setModalLimpeza] = useState(false)
+  const [mesesFrios, setMesesFrios] = useState(3)
+  const [limpando, setLimpando] = useState(false)
+
   useEffect(() => {
     buscarListas()
+  }, [])
+
+  // Recarrega sempre que mudar a página, a busca ou o filtro
+  useEffect(() => {
     buscarContatos()
-  }, [filtroLista]) // Recarrega os contatos sempre que você mudar o filtro de lista
+  }, [pagina, filtroLista, busca]) 
 
   const buscarListas = async () => {
     const { data } = await supabase.from('listas').select('id, nome').order('nome')
@@ -38,21 +49,23 @@ export default function ContatosPage() {
   const buscarContatos = async () => {
     setCarregando(true)
     
-    // Prepara a busca puxando os dados do contato E o nome da lista dele
-    let query = supabase
-      .from('contatos')
-      .select('*, listas(nome)')
+    // Configura a query para trazer os dados e a CONTAGEM TOTAL exata
+    let query = supabase.from('contatos').select('*, listas(nome)', { count: 'exact' })
+
+    if (filtroLista !== 'todas') query = query.eq('lista_id', filtroLista)
+    if (busca) query = query.ilike('email', `%${busca}%`) // Busca no banco de dados
+
+    // Lógica da Paginação Matemática
+    const de = (pagina - 1) * itensPorPagina
+    const ate = de + itensPorPagina - 1
+
+    const { data, count, error } = await query
       .order('created_at', { ascending: false })
-      .limit(100) // Limite inicial para não travar a tela se você tiver 50.000 leads
-
-    // Se escolheu uma lista específica no filtro, aplica a regra
-    if (filtroLista !== 'todas') {
-      query = query.eq('lista_id', filtroLista)
-    }
-
-    const { data, error } = await query
+      .range(de, ate)
     
     if (data) setContatos(data)
+    if (count !== null) setTotalContatos(count)
+      
     setCarregando(false)
   }
 
@@ -62,40 +75,52 @@ export default function ContatosPage() {
     setSalvando(true)
 
     const { error } = await supabase.from('contatos').insert([{ 
-      nome: novoNome || 'Lead Manual', 
-      email: novoEmail,
-      lista_id: novaListaId
+      nome: novoNome || 'Lead Manual', email: novoEmail.toLowerCase(), lista_id: novaListaId
     }])
 
     if (!error) {
-      setNovoNome('')
-      setNovoEmail('')
-      setNovaListaId('')
-      setModalAberto(false)
-      buscarContatos()
+      setNovoNome(''); setNovoEmail(''); setNovaListaId(''); setModalAberto(false); buscarContatos()
     } else {
-      alert('Erro ao salvar contato. Ele já existe ou houve falha na rede.')
+      alert('Erro ao salvar contato.')
     }
     setSalvando(false)
   }
 
   const deletarContato = async (id: number) => {
     if (!confirm('Tem certeza que deseja apagar este contato permanentemente?')) return
-
     const { error } = await supabase.from('contatos').delete().eq('id', id)
     if (!error) buscarContatos()
   }
 
-  // Filtra os contatos na tela baseando-se no que você digitou na barra de pesquisa
-  const contatosFiltrados = contatos.filter(c => 
-    c.email.toLowerCase().includes(busca.toLowerCase()) || 
-    (c.nome && c.nome.toLowerCase().includes(busca.toLowerCase()))
-  )
+  // --- FUNÇÃO DA VASSOURA (Limpeza de Frios) ---
+  const executarLimpezaFrios = async () => {
+    setLimpando(true)
+    const dataLimite = new Date()
+    dataLimite.setMonth(dataLimite.getMonth() - mesesFrios)
+
+    // Deleta do banco todos que foram criados antes da data limite
+    const { error, count } = await supabase
+      .from('contatos')
+      .delete()
+      .lt('created_at', dataLimite.toISOString())
+
+    if (!error) {
+      alert(`Limpeza concluída! Contatos antigos removidos com sucesso.`)
+      setModalLimpeza(false)
+      setPagina(1) // Volta pra página 1
+      buscarContatos()
+    } else {
+      alert('Erro ao realizar a limpeza.')
+    }
+    setLimpando(false)
+  }
+
+  const totalPaginas = Math.ceil(totalContatos / itensPorPagina) || 1
 
   return (
     <div className="max-w-6xl mx-auto relative">
       
-      {/* --- MODAL ADICIONAR CONTATO MANUAL --- */}
+      {/* MODAL ADICIONAR CONTATO MANUAL */}
       {modalAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -136,16 +161,55 @@ export default function ContatosPage() {
         </div>
       )}
 
+      {/* MODAL LIMPEZA DE FRIOS */}
+      {modalLimpeza && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-rose-100 bg-rose-50 flex items-center gap-4">
+              <div className="bg-rose-200 p-3 rounded-full text-rose-700"><Eraser className="size-6" /></div>
+              <div>
+                <h2 className="text-xl font-black text-rose-900">Limpeza de Base (Frios)</h2>
+                <p className="text-rose-700 text-sm mt-1">Exclua leads antigos para proteger a saúde do seu domínio.</p>
+              </div>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-sm font-medium">Selecione abaixo o período de inatividade. Contatos adicionados antes desse período serão excluídos da base.</p>
+              <div>
+                <select value={mesesFrios} onChange={e => setMesesFrios(Number(e.target.value))} className="w-full p-4 border border-slate-200 rounded-xl outline-none focus:border-rose-500 bg-white font-bold text-slate-700">
+                  <option value={1}>Mais de 1 Mês</option>
+                  <option value={2}>Mais de 2 Meses</option>
+                  <option value={3}>Mais de 3 Meses (Recomendado)</option>
+                  <option value={6}>Mais de 6 Meses</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button type="button" onClick={() => setModalLimpeza(false)} className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors">Cancelar</button>
+              <button onClick={executarLimpezaFrios} disabled={limpando} className="px-6 py-2.5 rounded-xl font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-md disabled:opacity-50 flex items-center gap-2">
+                {limpando ? <Loader2 className="size-5 animate-spin" /> : 'Confirmar Exclusão'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CABEÇALHO */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <div>
           <h2 className="text-3xl font-black text-slate-900">Base de Contatos</h2>
-          <p className="text-lg text-slate-600 mt-2">Gerencie todos os seus leads cadastrados e importados.</p>
+          <p className="text-lg text-slate-600 mt-2">Gerencie todos os seus leads. Total na base: <strong>{totalContatos}</strong></p>
         </div>
         
-        <button onClick={() => setModalAberto(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-sm shrink-0">
-          <Plus className="size-5" /> Adicionar Manual
-        </button>
+        <div className="flex gap-3">
+          <button onClick={() => setModalLimpeza(true)} className="flex items-center gap-2 bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 font-bold py-3 px-5 rounded-lg transition-colors shadow-sm shrink-0">
+            <Eraser className="size-5" /> Limpar Base
+          </button>
+          <button onClick={() => setModalAberto(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-5 rounded-lg transition-colors shadow-sm shrink-0">
+            <Plus className="size-5" /> Adicionar
+          </button>
+        </div>
       </div>
 
       {/* BARRA DE FERRAMENTAS (Filtros e Busca) */}
@@ -154,9 +218,9 @@ export default function ContatosPage() {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
           <input 
             type="text" 
-            placeholder="Buscar por nome ou e-mail..." 
+            placeholder="Buscar por e-mail... (Aperte Enter)" 
             value={busca}
-            onChange={(e) => setBusca(e.target.value)}
+            onChange={(e) => { setBusca(e.target.value); setPagina(1) }}
             className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
           />
         </div>
@@ -165,7 +229,7 @@ export default function ContatosPage() {
           <Filter className="size-5 text-slate-400" />
           <select 
             value={filtroLista} 
-            onChange={(e) => setFiltroLista(e.target.value)}
+            onChange={(e) => { setFiltroLista(e.target.value); setPagina(1) }}
             className="bg-transparent outline-none text-slate-700 font-bold cursor-pointer"
           >
             <option value="todas">Todas as Listas</option>
@@ -196,14 +260,14 @@ export default function ContatosPage() {
                     <div className="flex justify-center"><Loader2 className="size-8 animate-spin" /></div>
                   </td>
                 </tr>
-              ) : contatosFiltrados.length === 0 ? (
+              ) : contatos.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="p-12 text-center text-slate-500 text-lg">
-                    Nenhum contato encontrado nesta busca.
+                    Nenhum contato encontrado nesta página.
                   </td>
                 </tr>
               ) : (
-                contatosFiltrados.map((contato) => (
+                contatos.map((contato) => (
                   <tr key={contato.id} className="hover:bg-slate-50 transition-colors">
                     <td className="p-6">
                       <div className="flex items-center gap-3">
@@ -244,10 +308,34 @@ export default function ContatosPage() {
           </table>
         </div>
         
-        {/* Rodapé da Tabela */}
-        {!carregando && contatosFiltrados.length > 0 && (
-          <div className="p-4 border-t border-slate-100 bg-slate-50 text-center text-sm text-slate-500 font-bold">
-            Mostrando os últimos {contatosFiltrados.length} contatos encontrados.
+        {/* --- CONTROLES DE PAGINAÇÃO --- */}
+        {!carregando && totalContatos > 0 && (
+          <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+            <p className="text-sm text-slate-500 font-bold hidden sm:block">
+              Exibindo {((pagina - 1) * itensPorPagina) + 1} a {Math.min(pagina * itensPorPagina, totalContatos)} de {totalContatos} leads.
+            </p>
+            
+            <div className="flex items-center gap-4 mx-auto sm:mx-0">
+              <button 
+                onClick={() => setPagina(p => p - 1)} 
+                disabled={pagina === 1}
+                className="flex items-center gap-1 px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
+              >
+                <ChevronLeft className="size-4" /> Anterior
+              </button>
+              
+              <span className="text-sm font-bold text-slate-700">
+                Página {pagina} de {totalPaginas}
+              </span>
+              
+              <button 
+                onClick={() => setPagina(p => p + 1)} 
+                disabled={pagina >= totalPaginas}
+                className="flex items-center gap-1 px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
+              >
+                Próxima <ChevronRight className="size-4" />
+              </button>
+            </div>
           </div>
         )}
       </div>
