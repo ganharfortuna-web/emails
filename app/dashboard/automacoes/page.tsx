@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, CheckCircle2, Loader2, Hourglass } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Link2, Bold, Type } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -10,7 +10,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 export default function AutomacoesPage() {
   const [listas, setListas] = useState<any[]>([])
-  const [campanhas, setCampanhas] = useState<any[]>([]) // 🗄️ Novo estado para guardar o histórico
+  const [campanhas, setCampanhas] = useState<any[]>([]) 
   const [carregandoHistorico, setCarregandoHistorico] = useState(true)
   
   // Estados do Formulário de Disparo
@@ -19,9 +19,12 @@ export default function AutomacoesPage() {
   const [mensagem, setMensagem] = useState('')
   const [enviando, setEnviando] = useState(false)
 
+  // Referência para saber onde o cursor do mouse está na caixa de texto
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
   useEffect(() => {
     buscarListas()
-    buscarCampanhas() // Assim que abrir a tela, já puxa o histórico
+    buscarCampanhas() 
   }, [])
 
   const buscarListas = async () => {
@@ -29,18 +32,51 @@ export default function AutomacoesPage() {
     if (data) setListas(data)
   }
 
-  // --- NOVA FUNÇÃO: PUXAR HISTÓRICO ---
   const buscarCampanhas = async () => {
     setCarregandoHistorico(true)
     const { data } = await supabase
       .from('campanhas')
-      .select('*, listas(nome)') // Puxa os dados da campanha E o nome da lista vinculada
+      .select('*, listas(nome)')
       .order('created_at', { ascending: false })
-      .limit(5) // Mostra só os 5 disparos mais recentes para não poluir
+      .limit(5) 
     
     if (data) setCampanhas(data)
     setCarregandoHistorico(false)
   }
+
+  // --- MOTOR DE FORMATAÇÃO HTML ---
+  const inserirFormatacao = (tagInicial: string, tagFinal: string, placeholder: string) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    const inicio = textarea.selectionStart
+    const fim = textarea.selectionEnd
+    const textoSelecionado = mensagem.substring(inicio, fim) || placeholder
+    
+    const novoTexto = mensagem.substring(0, inicio) + tagInicial + textoSelecionado + tagFinal + mensagem.substring(fim)
+    setMensagem(novoTexto)
+
+    // Devolve o foco pra caixa de texto automaticamente
+    setTimeout(() => {
+      textarea.focus()
+      textarea.setSelectionRange(inicio + tagInicial.length, inicio + tagInicial.length + textoSelecionado.length)
+    }, 0)
+  }
+
+  const InserirLink = () => {
+    const url = window.prompt('🔗 Cole o link aqui (ex: https://seusite.com):')
+    if (!url) return
+    
+    // Injeta o HTML com cor azul e sublinhado para ficar com cara de link no e-mail
+    inserirFormatacao(
+      `<a href="${url}" target="_blank" style="color: #2563eb; font-weight: bold; text-decoration: underline;">`, 
+      '</a>', 
+      'Clique aqui para acessar'
+    )
+  }
+
+  const InserirNegrito = () => inserirFormatacao('<strong>', '</strong>', 'Texto em Destaque')
+  const InserirParagrafo = () => inserirFormatacao('<br><br>', '', '')
 
   // --- FUNÇÃO ATUALIZADA: SALVAR NO BANCO ---
   const prepararDisparo = async (e: React.FormEvent) => {
@@ -52,7 +88,6 @@ export default function AutomacoesPage() {
 
     setEnviando(true)
     
-    // Insere a campanha de verdade na tabela que você acabou de criar
     const { error } = await supabase
       .from('campanhas')
       .insert([
@@ -60,7 +95,7 @@ export default function AutomacoesPage() {
           lista_id: Number(listaSelecionada), 
           assunto: assunto, 
           mensagem: mensagem, 
-          status: 'Aguardando Disparo' // Status inicial até o motor rodar
+          status: 'Aguardando Disparo' 
         }
       ])
 
@@ -78,7 +113,6 @@ export default function AutomacoesPage() {
     setMensagem('')
     setListaSelecionada('')
     
-    // Atualiza a listinha lateral na mesma hora
     buscarCampanhas() 
   }
 
@@ -135,16 +169,48 @@ export default function AutomacoesPage() {
                 />
               </div>
 
+              {/* MENSAGEM COM BARRA DE FERRAMENTAS */}
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2 gap-2">
+                  <label className="block text-sm font-bold text-slate-700">Mensagem (HTML Suportado) *</label>
+                  
+                  {/* BARRA DE FERRAMENTAS HTML */}
+                  <div className="flex items-center gap-2">
+                    <button 
+                      type="button" 
+                      onClick={InserirLink}
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors"
+                    >
+                      <Link2 className="size-3.5" /> Link
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={InserirNegrito}
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors"
+                    >
+                      <Bold className="size-3.5" /> Negrito
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={InserirParagrafo}
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors"
+                      title="Pular linha"
+                    >
+                      <Type className="size-3.5" /> Pular Linha
+                    </button>
+                  </div>
+                </div>
+
                 <textarea 
-                  rows={8} 
+                  ref={textareaRef}
+                  rows={10} 
                   value={mensagem}
                   onChange={e => setMensagem(e.target.value)}
                   required
-                  placeholder="Escreva o corpo do seu e-mail aqui..."
-                  className="bg-white w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+                  placeholder="Escreva sua mensagem... Você pode usar os botões acima para formatar o texto."
+                  className="bg-white w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-mono text-sm leading-relaxed"
                 />
+                <p className="text-xs text-slate-400 mt-2 font-medium">Dica: Selecione um texto e clique no botão de Link para transformá-lo automaticamente.</p>
               </div>
 
             </div>
