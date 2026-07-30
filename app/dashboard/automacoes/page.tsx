@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, FileText, CheckCircle2 } from 'lucide-react'
+import { Send, Clock, Mail, LayoutTemplate, CheckCircle2, Loader2, Hourglass } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -10,6 +10,8 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 export default function AutomacoesPage() {
   const [listas, setListas] = useState<any[]>([])
+  const [campanhas, setCampanhas] = useState<any[]>([]) // 🗄️ Novo estado para guardar o histórico
+  const [carregandoHistorico, setCarregandoHistorico] = useState(true)
   
   // Estados do Formulário de Disparo
   const [listaSelecionada, setListaSelecionada] = useState('')
@@ -19,6 +21,7 @@ export default function AutomacoesPage() {
 
   useEffect(() => {
     buscarListas()
+    buscarCampanhas() // Assim que abrir a tela, já puxa o histórico
   }, [])
 
   const buscarListas = async () => {
@@ -26,6 +29,20 @@ export default function AutomacoesPage() {
     if (data) setListas(data)
   }
 
+  // --- NOVA FUNÇÃO: PUXAR HISTÓRICO ---
+  const buscarCampanhas = async () => {
+    setCarregandoHistorico(true)
+    const { data } = await supabase
+      .from('campanhas')
+      .select('*, listas(nome)') // Puxa os dados da campanha E o nome da lista vinculada
+      .order('created_at', { ascending: false })
+      .limit(5) // Mostra só os 5 disparos mais recentes para não poluir
+    
+    if (data) setCampanhas(data)
+    setCarregandoHistorico(false)
+  }
+
+  // --- FUNÇÃO ATUALIZADA: SALVAR NO BANCO ---
   const prepararDisparo = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!listaSelecionada || !assunto || !mensagem) {
@@ -35,13 +52,34 @@ export default function AutomacoesPage() {
 
     setEnviando(true)
     
-    // 🚧 Aqui vai entrar o motor de envio de e-mails na próxima etapa!
-    setTimeout(() => {
-      alert("Simulação de disparo concluída! O motor real será conectado aqui.")
+    // Insere a campanha de verdade na tabela que você acabou de criar
+    const { error } = await supabase
+      .from('campanhas')
+      .insert([
+        { 
+          lista_id: Number(listaSelecionada), 
+          assunto: assunto, 
+          mensagem: mensagem, 
+          status: 'Aguardando Disparo' // Status inicial até o motor rodar
+        }
+      ])
+
+    if (error) {
+      alert("Erro ao salvar a campanha. Verifique o banco de dados.")
+      console.error(error)
       setEnviando(false)
-      setAssunto('')
-      setMensagem('')
-    }, 2000)
+      return
+    }
+
+    alert("🎉 Campanha salva com sucesso! O histórico já foi atualizado.")
+    
+    setEnviando(false)
+    setAssunto('')
+    setMensagem('')
+    setListaSelecionada('')
+    
+    // Atualiza a listinha lateral na mesma hora
+    buscarCampanhas() 
   }
 
   return (
@@ -55,7 +93,7 @@ export default function AutomacoesPage() {
 
       <div className="grid lg:grid-cols-3 gap-8">
         
-        {/* ÁREA ESQUERDA: EDITOR DE E-MAIL (Ocupa 2 colunas) */}
+        {/* ÁREA ESQUERDA: EDITOR DE E-MAIL */}
         <div className="lg:col-span-2">
           <form onSubmit={prepararDisparo} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             
@@ -68,14 +106,13 @@ export default function AutomacoesPage() {
 
             <div className="p-6 space-y-6">
               
-              {/* Seleção de Lista */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Para qual lista deseja enviar? *</label>
                 <select 
                   value={listaSelecionada} 
                   onChange={e => setListaSelecionada(e.target.value)}
                   required
-                  className="bg-white w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium"
+                  className="bg-white w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium cursor-pointer"
                 >
                   <option value="" disabled>Selecione uma lista de contatos...</option>
                   {listas.map(lista => (
@@ -86,7 +123,6 @@ export default function AutomacoesPage() {
                 </select>
               </div>
 
-              {/* Assunto */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Assunto do E-mail *</label>
                 <input 
@@ -99,7 +135,6 @@ export default function AutomacoesPage() {
                 />
               </div>
 
-              {/* Corpo da Mensagem */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
                 <textarea 
@@ -116,7 +151,7 @@ export default function AutomacoesPage() {
 
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
               <p className="text-xs text-slate-500 font-medium hidden sm:block">
-                Revise sua mensagem antes de enviar.
+                Revise sua mensagem antes de salvar a campanha.
               </p>
               
               <button 
@@ -125,46 +160,54 @@ export default function AutomacoesPage() {
                 className="w-full sm:w-auto px-8 py-4 rounded-xl font-black text-white bg-blue-600 hover:bg-blue-700 shadow-md disabled:opacity-50 flex items-center justify-center gap-3 transition-colors text-lg"
               >
                 {enviando ? (
-                  <>Enviando...</>
+                  <><Loader2 className="size-5 animate-spin" /> Salvando...</>
                 ) : (
-                  <><Send className="size-5" /> Disparar Campanha</>
+                  <><Send className="size-5" /> Salvar Campanha</>
                 )}
               </button>
             </div>
           </form>
         </div>
 
-        {/* ÁREA DIREITA: INFORMAÇÕES E HISTÓRICO (Ocupa 1 coluna) */}
+        {/* ÁREA DIREITA: INFORMAÇÕES E HISTÓRICO REAL */}
         <div className="space-y-6">
           
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
             <h3 className="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2">
-              <Clock className="size-5 text-slate-400" /> Últimos Disparos
+              <Clock className="size-5 text-slate-400" /> Histórico de Disparos
             </h3>
             
             <div className="space-y-4">
-              {/* Exemplo Estático de Histórico (Será substituído pelo banco de dados) */}
-              <div className="p-4 rounded-xl border border-slate-100 bg-slate-50">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md flex items-center gap-1">
-                    <CheckCircle2 className="size-3" /> Concluído
-                  </span>
-                  <span className="text-xs font-bold text-slate-400">Ontem</span>
+              
+              {carregandoHistorico ? (
+                <div className="flex justify-center p-4">
+                   <Loader2 className="size-6 animate-spin text-blue-500" />
                 </div>
-                <p className="font-bold text-slate-800 text-sm truncate">Lançamento E-book VIP</p>
-                <p className="text-xs text-slate-500 mt-1">Para: Leads - Ebook Masterclass</p>
-              </div>
+              ) : campanhas.length === 0 ? (
+                <div className="p-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-center">
+                  <p className="text-sm text-slate-500 font-medium">Nenhuma campanha criada ainda.</p>
+                </div>
+              ) : (
+                campanhas.map((campanha) => (
+                  <div key={campanha.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 transition-colors hover:border-blue-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-md flex items-center gap-1 whitespace-nowrap">
+                        <Hourglass className="size-3" /> {campanha.status}
+                      </span>
+                      <span className="text-xs font-bold text-slate-400 whitespace-nowrap ml-2">
+                        {new Date(campanha.created_at).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                    <p className="font-bold text-slate-800 text-sm truncate" title={campanha.assunto}>
+                      {campanha.assunto}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1 truncate">
+                      Lista: <strong>{campanha.listas?.nome || 'Lista Excluída'}</strong>
+                    </p>
+                  </div>
+                ))
+              )}
 
-              <div className="p-4 rounded-xl border border-slate-100 bg-slate-50">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md flex items-center gap-1">
-                    <CheckCircle2 className="size-3" /> Concluído
-                  </span>
-                  <span className="text-xs font-bold text-slate-400">12/08/2026</span>
-                </div>
-                <p className="font-bold text-slate-800 text-sm truncate">Boas-vindas Mentoria</p>
-                <p className="text-xs text-slate-500 mt-1">Para: Compradores</p>
-              </div>
             </div>
           </div>
 
@@ -175,7 +218,7 @@ export default function AutomacoesPage() {
             <ul className="text-sm text-emerald-700 space-y-2 font-medium">
               <li>• Evite palavras como "Grátis" ou "Promoção" no assunto para não cair no Spam.</li>
               <li>• Mantenha o texto limpo e direto ao ponto.</li>
-              <li>• Teste seus links antes de disparar para toda a base.</li>
+              <li>• Não anexe arquivos pesados diretamente na mensagem, use links do Google Drive.</li>
             </ul>
           </div>
 
