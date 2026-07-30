@@ -1,12 +1,37 @@
 "use client"
 
-import { useState, useEffect, useRef } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Link2, Bold, Type } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
+import dynamic from 'next/dynamic'
+
+// TRUQUE NINJA 1: Silencia o aviso de falta de tipagem do CSS
+// @ts-ignore
+import 'react-quill/dist/quill.snow.css'
+
+// TRUQUE NINJA 2: Importa o Quill ignorando a falta do pacote @types
+const ReactQuill = dynamic(() => {
+  // @ts-ignore
+  return import('react-quill')
+}, { 
+  ssr: false,
+  loading: () => <p className="p-4 text-slate-400 text-sm font-medium">Carregando editor visual...</p>
+})
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Configuração dos botões que vão aparecer na barrinha do seu "Word"
+const modulosEditor = {
+  toolbar: [
+    [{ 'header': [1, 2, 3, false] }], 
+    ['bold', 'italic', 'underline'],
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    ['link'],
+    ['clean'] 
+  ],
+}
 
 export default function AutomacoesPage() {
   const [listas, setListas] = useState<any[]>([])
@@ -16,11 +41,8 @@ export default function AutomacoesPage() {
   // Estados do Formulário de Disparo
   const [listaSelecionada, setListaSelecionada] = useState('')
   const [assunto, setAssunto] = useState('')
-  const [mensagem, setMensagem] = useState('')
+  const [mensagem, setMensagem] = useState('') 
   const [enviando, setEnviando] = useState(false)
-
-  // Referência para saber onde o cursor do mouse está na caixa de texto
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     buscarListas()
@@ -44,44 +66,13 @@ export default function AutomacoesPage() {
     setCarregandoHistorico(false)
   }
 
-  // --- MOTOR DE FORMATAÇÃO HTML ---
-  const inserirFormatacao = (tagInicial: string, tagFinal: string, placeholder: string) => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    const inicio = textarea.selectionStart
-    const fim = textarea.selectionEnd
-    const textoSelecionado = mensagem.substring(inicio, fim) || placeholder
-    
-    const novoTexto = mensagem.substring(0, inicio) + tagInicial + textoSelecionado + tagFinal + mensagem.substring(fim)
-    setMensagem(novoTexto)
-
-    // Devolve o foco pra caixa de texto automaticamente
-    setTimeout(() => {
-      textarea.focus()
-      textarea.setSelectionRange(inicio + tagInicial.length, inicio + tagInicial.length + textoSelecionado.length)
-    }, 0)
-  }
-
-  const InserirLink = () => {
-    const url = window.prompt('🔗 Cole o link aqui (ex: https://seusite.com):')
-    if (!url) return
-    
-    // Injeta o HTML com cor azul e sublinhado para ficar com cara de link no e-mail
-    inserirFormatacao(
-      `<a href="${url}" target="_blank" style="color: #2563eb; font-weight: bold; text-decoration: underline;">`, 
-      '</a>', 
-      'Clique aqui para acessar'
-    )
-  }
-
-  const InserirNegrito = () => inserirFormatacao('<strong>', '</strong>', 'Texto em Destaque')
-  const InserirParagrafo = () => inserirFormatacao('<br><br>', '', '')
-
-  // --- FUNÇÃO ATUALIZADA: SALVAR NO BANCO ---
   const prepararDisparo = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!listaSelecionada || !assunto || !mensagem) {
+    
+    // O React Quill quando está vazio deixa um <p><br></p>, então validamos isso
+    const mensagemVazia = mensagem.replace(/<[^>]*>?/gm, '').trim().length === 0
+
+    if (!listaSelecionada || !assunto || mensagemVazia) {
       alert("Preencha todos os campos antes de disparar.")
       return
     }
@@ -119,7 +110,6 @@ export default function AutomacoesPage() {
   return (
     <div className="max-w-6xl mx-auto">
       
-      {/* CABEÇALHO */}
       <div className="mb-8">
         <h2 className="text-3xl font-black text-slate-900">Nova Campanha</h2>
         <p className="text-lg text-slate-600 mt-2">Crie, programe e dispare e-mails em massa para as suas listas.</p>
@@ -129,7 +119,7 @@ export default function AutomacoesPage() {
         
         {/* ÁREA ESQUERDA: EDITOR DE E-MAIL */}
         <div className="lg:col-span-2">
-          <form onSubmit={prepararDisparo} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <form onSubmit={prepararDisparo} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
             
             <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
               <div className="bg-blue-100 p-2 rounded-lg text-blue-700">
@@ -138,7 +128,7 @@ export default function AutomacoesPage() {
               <h3 className="font-bold text-slate-800 text-lg">Compositor de Mensagem</h3>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 flex-1">
               
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Para qual lista deseja enviar? *</label>
@@ -169,53 +159,24 @@ export default function AutomacoesPage() {
                 />
               </div>
 
-              {/* MENSAGEM COM BARRA DE FERRAMENTAS */}
+              {/* EDITOR VISUAL ESTILO WORD */}
               <div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2 gap-2">
-                  <label className="block text-sm font-bold text-slate-700">Mensagem (HTML Suportado) *</label>
-                  
-                  {/* BARRA DE FERRAMENTAS HTML */}
-                  <div className="flex items-center gap-2">
-                    <button 
-                      type="button" 
-                      onClick={InserirLink}
-                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors"
-                    >
-                      <Link2 className="size-3.5" /> Link
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={InserirNegrito}
-                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors"
-                    >
-                      <Bold className="size-3.5" /> Negrito
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={InserirParagrafo}
-                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors"
-                      title="Pular linha"
-                    >
-                      <Type className="size-3.5" /> Pular Linha
-                    </button>
-                  </div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
+                
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base">
+                  <ReactQuill 
+                    theme="snow"
+                    value={mensagem}
+                    onChange={setMensagem}
+                    modules={modulosEditor}
+                    placeholder="Escreva o corpo do seu e-mail aqui..."
+                  />
                 </div>
-
-                <textarea 
-                  ref={textareaRef}
-                  rows={10} 
-                  value={mensagem}
-                  onChange={e => setMensagem(e.target.value)}
-                  required
-                  placeholder="Escreva sua mensagem... Você pode usar os botões acima para formatar o texto."
-                  className="bg-white w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-mono text-sm leading-relaxed"
-                />
-                <p className="text-xs text-slate-400 mt-2 font-medium">Dica: Selecione um texto e clique no botão de Link para transformá-lo automaticamente.</p>
               </div>
 
             </div>
 
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between mt-auto">
               <p className="text-xs text-slate-500 font-medium hidden sm:block">
                 Revise sua mensagem antes de salvar a campanha.
               </p>
@@ -235,7 +196,7 @@ export default function AutomacoesPage() {
           </form>
         </div>
 
-        {/* ÁREA DIREITA: INFORMAÇÕES E HISTÓRICO REAL */}
+        {/* ÁREA DIREITA: HISTÓRICO */}
         <div className="space-y-6">
           
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
