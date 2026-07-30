@@ -1,15 +1,31 @@
 "use client"
 
-import { useState, useEffect } from 'react'
-import { Plus, Users, ArrowRight, Trash2, Loader2, UploadCloud, X } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Plus, Users, ArrowRight, Trash2, Loader2, UploadCloud, X, FileText } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
+import { useRouter } from 'next/navigation'
 
 // Inicialização do Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+// Tipagem rigorosa para agradar o TypeScript
+type ContatoImportado = {
+  nome: string
+  email: string
+  lista_id: number
+}
+
+type ModalImportacao = {
+  aberto: boolean
+  listaId: number | null
+  listaNome: string
+}
+
 export default function ListasPage() {
+  const router = useRouter()
+  
   const [listas, setListas] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
   
@@ -18,7 +34,7 @@ export default function ListasPage() {
   const [nomeNovaLista, setNomeNovaLista] = useState('')
 
   // Estados para o Modal de Importação de Contatos
-  const [modalImportacao, setModalImportacao] = useState({ aberto: false, listaId: null as number | null, listaNome: '' })
+  const [modalImportacao, setModalImportacao] = useState<ModalImportacao>({ aberto: false, listaId: null, listaNome: '' })
   const [textoImportacao, setTextoImportacao] = useState('')
   const [importando, setImportando] = useState(false)
 
@@ -53,33 +69,63 @@ export default function ListasPage() {
     }
   }
 
+  // --- EXCLUSÃO CORRIGIDA (EFEITO CASCATA) ---
   const deletarLista = async (id: number) => {
-    if (!confirm('Tem certeza que deseja apagar esta lista? Os contatos dentro dela também poderão ser afetados.')) return
+    if (!confirm('🚨 ATENÇÃO: Apagar esta lista também apagará TODOS os contatos que estão dentro dela. Tem certeza?')) return
 
-    const { error } = await supabase
-      .from('listas')
-      .delete()
-      .eq('id', id)
+    // 1º Passo: Apaga os contatos vinculados a esta lista para liberar a trava do banco
+    await supabase.from('contatos').delete().eq('lista_id', id)
+
+    // 2º Passo: Apaga a lista vazia
+    const { error } = await supabase.from('listas').delete().eq('id', id)
 
     if (!error) {
       buscarListas() 
     } else {
-      alert('Erro ao deletar. Tente novamente.')
+      alert('Erro ao deletar a lista. Tente novamente.')
+      console.error(error)
     }
   }
 
-  // --- NOVA FUNÇÃO: PROCESSAR IMPORTAÇÃO ---
+  const lidarComUploadArquivo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const conteudo = event.target?.result as string
+      if (!conteudo) return
+
+      const regexEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+      const emailsEncontrados = conteudo.match(regexEmail) || []
+
+      if (emailsEncontrados.length === 0) {
+        alert('Nenhum e-mail válido foi encontrado dentro deste arquivo.')
+        return
+      }
+
+      const emailsUnicos = emailsEncontrados.filter((email, index, array) => array.indexOf(email) === index)
+      const textoAtual = textoImportacao.trim()
+      const novosEmailsFormatados = emailsUnicos.join('\n')
+      
+      setTextoImportacao(textoAtual ? `${textoAtual}\n${novosEmailsFormatados}` : novosEmailsFormatados)
+      
+      alert(`🎉 Sucesso! O sistema filtrou ${emailsUnicos.length} e-mails limpos do seu arquivo. Revise a lista abaixo.`)
+    }
+    
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
   const processarImportacao = async () => {
     if (!textoImportacao.trim() || !modalImportacao.listaId) return
     setImportando(true)
 
     const linhas = textoImportacao.split('\n')
-    
-    // O Ácido: Essa fórmula acha APENAS o e-mail e derrete o resto (vírgulas, espaços, etc)
     const regexEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/
 
-    const novosContatos = []
-    const emailsJaAdicionados = new Set() // Garante que não suba e-mails repetidos no mesmo texto
+    const novosContatos: ContatoImportado[] = []
+    const emailsJaAdicionados = new Set<string>() 
 
     for (const linha of linhas) {
       const match = linha.match(regexEmail)
@@ -120,10 +166,10 @@ export default function ListasPage() {
   return (
     <div className="max-w-6xl mx-auto relative">
       
-      {/* --- MODAL DE IMPORTAÇÃO (Sobrepõe a tela quando aberto) --- */}
+      {/* MODAL DE IMPORTAÇÃO */}
       {modalImportacao.aberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
             
             <div className="p-5 border-b border-slate-100 bg-blue-50 flex justify-between items-center">
               <div>
@@ -141,10 +187,28 @@ export default function ListasPage() {
             </div>
             
             <div className="p-6">
-              <p className="text-sm text-slate-600 mb-2 font-bold">Cole os e-mails (1 por linha):</p>
+              
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 p-4 rounded-xl">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">Extrator Inteligente</h3>
+                  <p className="text-xs text-slate-500 mt-1">Envie um arquivo e o sistema vai garimpar apenas os e-mails.</p>
+                </div>
+                
+                <label className="cursor-pointer bg-white text-blue-700 hover:bg-blue-50 font-bold py-2.5 px-4 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors border border-blue-200 shadow-sm shrink-0">
+                  <FileText className="size-4" />
+                  Selecionar Arquivo (.txt, .csv)
+                  <input type="file" accept=".txt,.csv" className="hidden" onChange={lidarComUploadArquivo} />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-slate-600 font-bold">Cole manualmente ou revise os e-mails extraídos:</p>
+                <span className="text-xs text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded-md">1 por linha</span>
+              </div>
+              
               <textarea 
                 rows={8} 
-                className="w-full p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono text-slate-700 bg-slate-50"
+                className="w-full p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono text-slate-700 bg-white"
                 placeholder="exemplo@gmail.com&#10;contato@empresa.com.br&#10;..."
                 value={textoImportacao}
                 onChange={(e) => setTextoImportacao(e.target.value)}
@@ -175,7 +239,6 @@ export default function ListasPage() {
           </div>
         </div>
       )}
-
 
       {/* CABEÇALHO */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
@@ -274,7 +337,7 @@ export default function ListasPage() {
                   <td className="p-6">
                     <div className="flex items-center justify-end gap-3 whitespace-nowrap">
                       
-                      {/* NOVO BOTÃO: Importar */}
+                      {/* BOTÃO: Importar */}
                       <button 
                         onClick={() => setModalImportacao({ aberto: true, listaId: lista.id, listaNome: lista.nome })}
                         className="text-emerald-700 bg-emerald-50 hover:bg-emerald-100 font-bold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors border border-emerald-100 shadow-sm"
@@ -284,8 +347,11 @@ export default function ListasPage() {
                         <span className="hidden xl:inline">Importar</span>
                       </button>
 
-                      {/* Botão Ver Contatos */}
-                      <button className="text-blue-700 bg-blue-50 hover:bg-blue-100 font-bold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors border border-blue-100 shadow-sm">
+                      {/* --- BOTÃO VER CONTATOS CORRIGIDO --- */}
+                      <button 
+                        onClick={() => router.push('/dashboard/contatos')}
+                        className="text-blue-700 bg-blue-50 hover:bg-blue-100 font-bold px-3 py-2 rounded-lg flex items-center gap-2 transition-colors border border-blue-100 shadow-sm cursor-pointer"
+                      >
                         <span className="hidden xl:inline">Ver contatos</span> 
                         <ArrowRight className="size-4" />
                       </button>
