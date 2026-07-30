@@ -133,11 +133,11 @@ export default function ContatosPage() {
               <div className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Nome</label>
-                  <input type="text" value={novoNome} onChange={e => setNovoNome(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: João Silva" />
+                  <input type="text" value={novoNome} onChange={e => setNovoNome(e.target.value)} className="bg-white w-full p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: João Silva" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">E-mail *</label>
-                  <input type="email" value={novoEmail} onChange={e => setNovoEmail(e.target.value)} required className="w-full p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="joao@email.com" />
+                  <input type="email" value={novoEmail} onChange={e => setNovoEmail(e.target.value)} required className="bg-white w-full p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="joao@email.com" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Salvar na Lista *</label>
@@ -221,7 +221,7 @@ export default function ContatosPage() {
             placeholder="Buscar por e-mail... (Aperte Enter)" 
             value={busca}
             onChange={(e) => { setBusca(e.target.value); setPagina(1) }}
-            className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
+            className="bg-white w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
           />
         </div>
         
