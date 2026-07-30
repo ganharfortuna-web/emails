@@ -195,7 +195,7 @@ export default function ListasPage() {
             value={nomeNovaLista}
             onChange={e => setNomeNovaLista(e.target.value)}
             placeholder="Digite o nome da nova lista (Ex: Alunos Masterclass 2026)"
-            className="flex-1 w-full p-4 rounded-xl border border-blue-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium"
+            className="bg-white flex-1 w-full p-4 rounded-xl border border-blue-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium"
             autoFocus
             onKeyDown={e => e.key === 'Enter' && salvarNovaLista()}
           />
