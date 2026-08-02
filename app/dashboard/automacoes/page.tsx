@@ -23,15 +23,15 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey)
 // 🚀 O ARSENAL DE FORMATAÇÃO COMPLETO
 const modulosEditor = {
   toolbar: [
-    [{ 'font': [] }], // Família da Fonte
-    [{ 'size': ['small', false, 'large', 'huge'] }], // Tamanho
-    [{ 'header': [1, 2, 3, false] }], // Títulos
-    ['bold', 'italic', 'underline', 'strike'], // Estilos Base
-    [{ 'color': [] }, { 'background': [] }], // Cores do Texto e Fundo
-    [{ 'align': [] }], // Alinhamento (Esquerda, Centro, Direita, Justificado)
-    [{ 'list': 'ordered'}, { 'list': 'bullet' }], // Listas
-    ['link'], // Inserir Link
-    ['clean'] // Vassourinha (Limpar formatação)
+    [{ 'font': [] }], 
+    [{ 'size': ['small', false, 'large', 'huge'] }], 
+    [{ 'header': [1, 2, 3, false] }], 
+    ['bold', 'italic', 'underline', 'strike'], 
+    [{ 'color': [] }, { 'background': [] }], 
+    [{ 'align': [] }], 
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }], 
+    ['link'], 
+    ['clean'] 
   ],
 }
 
@@ -79,11 +79,12 @@ export default function AutomacoesPage() {
 
     setEnviando(true)
     
+    // 👇 CORREÇÃO APLICADA AQUI: Remoção do Number(), mantendo como String (UUID)
     const { error } = await supabase
       .from('campanhas')
       .insert([
         { 
-          lista_id: Number(listaSelecionada), 
+          lista_id: listaSelecionada, 
           assunto: assunto, 
           mensagem: mensagem, 
           status: 'Aguardando Disparo' 
@@ -163,10 +164,6 @@ export default function AutomacoesPage() {
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
                 
-                {/* 
-                  ATENÇÃO: Abaixo está o CSS injetado direto no Tailwind para consertar 
-                  a caixinha preta feia do Link e dar espaço pro texto respirar.
-                */}
                 <div className="bg-white rounded-xl border border-slate-200 overflow-visible
                   [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
                   [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
