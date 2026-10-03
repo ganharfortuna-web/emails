@@ -1,11 +1,3 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/login/page": "app/login/page.js",
-  "/page": "app/page.js",
-  "/dashboard/automacoes/configuracoes/page": "app/dashboard/automacoes/configuracoes/page.js",
-  "/dashboard/automacoes/page": "app/dashboard/automacoes/page.js",
-  "/dashboard/contatos/page": "app/dashboard/contatos/page.js",
-  "/dashboard/page": "app/dashboard/page.js",
-  "/dashboard/listas/page": "app/dashboard/listas/page.js",
-  "/dashboard/paginas/page": "app/dashboard/paginas/page.js"
+  "/page": "app/page.js"
 }
