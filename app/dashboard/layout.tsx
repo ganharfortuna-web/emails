@@ -1,4 +1,4 @@
-"use client"
+'use client'
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -13,7 +13,8 @@ import {
   LogOut, 
   Menu, 
   X,
-  Loader2
+  Loader2,
+  FileText // Adicionado para usar no menu de Páginas
 } from 'lucide-react'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -67,12 +68,14 @@ export default function DashboardLayout({
     router.push('/login')
   }
 
+  // --- MENU ATUALIZADO COM A NOVA ROTA DE CONFIGURAÇÕES ---
   const linksMenu = [
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
     { nome: 'Listas', rota: '/dashboard/listas', icone: Mail },
     { nome: 'Automações', rota: '/dashboard/automacoes', icone: GitMerge },
-    { nome: 'Páginas', rota: '/dashboard/paginas', icone: Settings },
+    { nome: 'Páginas', rota: '/dashboard/paginas', icone: FileText },
+    { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings }, // NOVO BOTÃO AQUI
   ]
 
   // Se ainda estiver verificando, mostra uma tela de carregamento pra ninguém ver o painel
@@ -150,7 +153,9 @@ export default function DashboardLayout({
                     key={link.nome} 
                     href={link.rota}
                     onClick={() => setMenuAberto(false)}
-                    className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-800 hover:text-white"
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg ${
+                      pathname === link.rota ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-slate-800 hover:text-white'
+                    }`}
                   >
                     <Icone className="size-5" />
                     {link.nome}
