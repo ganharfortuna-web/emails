@@ -14,7 +14,7 @@ import {
   Menu, 
   X,
   Loader2,
-  FileText // Adicionado para usar no menu de Páginas
+  FileText
 } from 'lucide-react'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -27,39 +27,33 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const [menuAberto, setMenuAberto] = useState(false)
-  
-  // NOVO: Estado para segurar a tela enquanto verifica o "crachá"
   const [verificandoAcesso, setVerificandoAcesso] = useState(true) 
   
   const router = useRouter()
   const pathname = usePathname()
 
-  // --- NOVA BARREIRA DE SEGURANÇA BLINDADA ---
   useEffect(() => {
     const checarAcesso = async () => {
-      // Pergunta pro Supabase se tem alguém logado neste navegador
       const { data: { session } } = await supabase.auth.getSession()
       
       if (!session) {
-        // Se não tiver crachá (sessão), expulsa direto pra tela de login
         router.push('/login')
       } else {
-        // Se tiver, libera a catraca escondendo a tela de carregamento
         setVerificandoAcesso(false)
       }
     }
 
     checarAcesso()
 
-    // Fica de plantão: se a sessão do usuário expirar do nada, expulsa ele
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+    // CORREÇÃO: Desestruturação correta do 'subscription' para Supabase v2
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
         router.push('/login')
       }
     })
 
     return () => {
-      authListener.subscription.unsubscribe()
+      subscription.unsubscribe()
     }
   }, [router])
 
@@ -68,17 +62,15 @@ export default function DashboardLayout({
     router.push('/login')
   }
 
-  // --- MENU ATUALIZADO COM A NOVA ROTA DE CONFIGURAÇÕES ---
   const linksMenu = [
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
     { nome: 'Listas', rota: '/dashboard/listas', icone: Mail },
     { nome: 'Automações', rota: '/dashboard/automacoes', icone: GitMerge },
     { nome: 'Páginas', rota: '/dashboard/paginas', icone: FileText },
-    { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings }, // NOVO BOTÃO AQUI
+    { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings },
   ]
 
-  // Se ainda estiver verificando, mostra uma tela de carregamento pra ninguém ver o painel
   if (verificandoAcesso) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
@@ -88,7 +80,6 @@ export default function DashboardLayout({
     )
   }
 
-  // Se passou da verificação ali em cima, renderiza o painel normal
   return (
     <div className="min-h-screen bg-slate-50 flex">
       
