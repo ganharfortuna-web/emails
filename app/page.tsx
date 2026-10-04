@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Mail, Server, ShieldCheck, CheckCircle2, ArrowRight } from 'lucide-react'
+import { Mail, Server, ShieldCheck, CheckCircle2, ArrowRight, BarChart3 } from 'lucide-react'
 
 export default function LandingPage() {
   return (
@@ -15,7 +15,7 @@ export default function LandingPage() {
           </h1>
           
           <p className="text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
-            Tenha sua própria infraestrutura de envios com alta taxa de entrega, pague apenas uma vez pela licença e nunca mais fique refém de planos mensais que limitam o seu crescimento.
+            Tenha sua própria infraestrutura de envios com rotação inteligente, rastreamento em tempo real e pague apenas uma vez pela licença.
           </p>
           
           <Link 
@@ -30,7 +30,7 @@ export default function LandingPage() {
 
       {/* BENEFÍCIOS SECTION */}
       <section className="py-24 bg-slate-50 px-4 border-b border-slate-200">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-6">
               Tecnologia de ponta para sua operação
@@ -41,41 +41,65 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-              <div className="bg-blue-900/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
-                <Mail className="size-7 text-blue-900" />
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+            {/* Card 1: Gmails Rotativos */}
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+              <div>
+                <div className="bg-blue-900/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                  <Mail className="size-7 text-blue-900" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-4">
+                  Até 50 Gmails Rotativos
+                </h3>
+                <p className="text-slate-600 text-sm leading-relaxed">
+                  Cadastre até 50 contas do Gmail utilizando Senha do App. O sistema rotaciona os envios automaticamente respeitando os limites de envio diários do Google.
+                </p>
               </div>
-              <h3 className="text-xl font-bold text-slate-900 mb-4">
-                Gmails Rotativos
-              </h3>
-              <p className="text-slate-600">
-                Cadastre múltiplas contas do Gmail utilizando App Passwords. O sistema rotaciona os envios automaticamente para proteger sua reputação.
-              </p>
             </div>
 
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-              <div className="bg-blue-900/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
-                <Server className="size-7 text-blue-900" />
+            {/* Card 2: SMTP Externo */}
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+              <div>
+                <div className="bg-blue-900/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                  <Server className="size-7 text-blue-900" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-4">
+                  Até 3 SMTPs Externos
+                </h3>
+                <p className="text-slate-600 text-sm leading-relaxed">
+                  Conecte até 3 servidores SMTP externos para diversificar seus disparos e rotacionar provedores com controle total.
+                </p>
               </div>
-              <h3 className="text-xl font-bold text-slate-900 mb-4">
-                SMTP Externo
-              </h3>
-              <p className="text-slate-600">
-                Precisa de envio em massa pesado? Conecte servidores SMTP externos e gerencie toda a entrega diretamente do seu painel.
-              </p>
             </div>
 
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-              <div className="bg-emerald-100 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
-                <ShieldCheck className="size-7 text-emerald-700" />
+            {/* Card 3: Rastreamento */}
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+              <div>
+                <div className="bg-orange-500/10 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                  <BarChart3 className="size-7 text-orange-600" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-4">
+                  Aberturas e Cliques
+                </h3>
+                <p className="text-slate-600 text-sm leading-relaxed">
+                  Rastreamento em tempo real do engajamento de suas campanhas. Saiba exatamente quem abriu a mensagem e quem clicou nos links.
+                </p>
               </div>
-              <h3 className="text-xl font-bold text-slate-900 mb-4">
-                Alta Taxa de Entrega
-              </h3>
-              <p className="text-slate-600">
-                Limpeza inteligente de listas e algoritmos de proteção garantem que seus e-mails cheguem na aba principal dos seus leads.
-              </p>
+            </div>
+
+            {/* Card 4: Alta Taxa de Entrega */}
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+              <div>
+                <div className="bg-emerald-100 w-14 h-14 flex items-center justify-center rounded-xl mb-6">
+                  <ShieldCheck className="size-7 text-emerald-700" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-4">
+                  Alta Taxa de Entrega
+                </h3>
+                <p className="text-slate-600 text-sm leading-relaxed">
+                  Rotação calculada e proteção de reputação de IP para garantir que seus e-mails caiam na caixa de entrada principal.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -99,18 +123,22 @@ export default function LandingPage() {
               <span className="block text-sm text-blue-200 mt-2">(Pagamento Único pela Instalação e Licença)</span>
             </div>
 
-            <ul className="text-left max-w-sm mx-auto space-y-4 mb-10">
+            <ul className="text-left max-w-md mx-auto space-y-4 mb-10">
               <li className="flex items-center gap-3 text-blue-50">
                 <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
-                Sistema 100% completo e instalado
+                Suporte a até 50 contas Gmail (Senha do App)
               </li>
               <li className="flex items-center gap-3 text-blue-50">
                 <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
-                Painel Admin e Automações
+                Rotação em até 3 SMTPs externos
               </li>
               <li className="flex items-center gap-3 text-blue-50">
                 <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
-                Criador de Landing Pages integrado
+                Rastreamento completo de aberturas e cliques
+              </li>
+              <li className="flex items-center gap-3 text-blue-50">
+                <CheckCircle2 className="size-5 text-emerald-400 shrink-0" />
+                Painel Admin e Gestão de Contatos/Listas
               </li>
             </ul>
 
