@@ -1,4 +1,12 @@
-import { MailCheck, MousePointerClick, AlertCircle } from 'lucide-react'
+import { 
+  MailCheck, 
+  MousePointerClick, 
+  AlertCircle, 
+  Server, 
+  CheckCircle2, 
+  XCircle, 
+  Settings 
+} from 'lucide-react'
 
 export default function DashboardOverview() {
   return (
@@ -50,39 +58,97 @@ export default function DashboardOverview() {
         </div>
       </div>
 
-      {/* RELATÓRIO DE CLIQUES */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
-        <h3 className="text-xl font-bold text-slate-900">
-          Relatório Rápido de Cliques
-        </h3>
-        
-        <br />
-        
-        <p className="text-slate-600 mb-8">
-          Acompanhe quais foram os links mais clicados nas suas últimas campanhas de disparo.
-        </p>
-        
-        <div className="space-y-4">
-          <div className="flex items-center justify-between py-4 border-b border-slate-100">
-            <span className="text-slate-700 font-bold">Link: /promocao-vitalicia</span>
-            <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
-              342 cliques
-            </span>
+      <div className="grid md:grid-cols-2 gap-6">
+        {/* RELATÓRIO DE CLIQUES */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
+          <h3 className="text-xl font-bold text-slate-900">
+            Relatório Rápido de Cliques
+          </h3>
+          
+          <br />
+          
+          <p className="text-slate-600 mb-8">
+            Acompanhe quais foram os links mais clicados nas suas últimas campanhas de disparo.
+          </p>
+          
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-4 border-b border-slate-100">
+              <span className="text-slate-700 font-bold">Link: /promocao-vitalicia</span>
+              <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
+                342 cliques
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-4 border-b border-slate-100">
+              <span className="text-slate-700 font-bold">Link: /video-apresentacao</span>
+              <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
+                128 cliques
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-4">
+              <span className="text-slate-700 font-bold">Link: /checkout</span>
+              <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
+                89 cliques
+              </span>
+            </div>
           </div>
-          <div className="flex items-center justify-between py-4 border-b border-slate-100">
-            <span className="text-slate-700 font-bold">Link: /video-apresentacao</span>
-            <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
-              128 cliques
-            </span>
+        </div>
+
+        {/* CONFIGURAÇÕES DE SMTP */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Server className="size-5 text-slate-700" />
+              Configurações de SMTPs
+            </h3>
+            <button className="text-slate-500 hover:text-blue-600 transition-colors p-2 bg-slate-50 hover:bg-blue-50 rounded-xl">
+              <Settings className="size-5" />
+            </button>
           </div>
-          <div className="flex items-center justify-between py-4">
-            <span className="text-slate-700 font-bold">Link: /checkout</span>
-            <span className="bg-blue-50 text-blue-800 px-4 py-1.5 rounded-full text-sm font-bold border border-blue-100">
-              89 cliques
-            </span>
+          
+          <p className="text-slate-600 mb-8">
+            Status atual e gerenciamento das suas contas de envio conectadas ao sistema.
+          </p>
+          
+          <div className="space-y-4">
+            {/* SMTP 1 - Sucesso */}
+            <div className="flex items-center justify-between py-3 border-b border-slate-100">
+              <div className="flex flex-col">
+                <span className="text-slate-700 font-bold">contato@suaempresa.com</span>
+                <span className="text-xs text-slate-400 mt-1 font-medium">smtp.hostinger.com • Porta 465</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-bold border border-emerald-100">
+                <CheckCircle2 className="size-4" />
+                Conectado
+              </div>
+            </div>
+
+            {/* SMTP 2 - Sucesso */}
+            <div className="flex items-center justify-between py-3 border-b border-slate-100">
+              <div className="flex flex-col">
+                <span className="text-slate-700 font-bold">marketing@suaempresa.com</span>
+                <span className="text-xs text-slate-400 mt-1 font-medium">smtp.sendgrid.net • Porta 587</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-bold border border-emerald-100">
+                <CheckCircle2 className="size-4" />
+                Conectado
+              </div>
+            </div>
+
+            {/* SMTP 3 - Erro/Aviso (Conecta com a métrica no topo) */}
+            <div className="flex items-center justify-between py-3">
+              <div className="flex flex-col">
+                <span className="text-slate-700 font-bold">vendas@gmail.com</span>
+                <span className="text-xs text-slate-400 mt-1 font-medium">smtp.gmail.com • Porta 465</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-sm font-bold border border-red-100">
+                <XCircle className="size-4" />
+                Reconectar
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
     </div>
   )
 }
