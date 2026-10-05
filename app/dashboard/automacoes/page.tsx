@@ -20,7 +20,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// 🚀 O ARSENAL DE FORMATAÇÃO COMPLETO
 const modulosEditor = {
   toolbar: [
     [{ 'font': [] }], 
@@ -79,8 +78,8 @@ export default function AutomacoesPage() {
 
     setEnviando(true)
     
-    // 👇 CORREÇÃO APLICADA AQUI: Remoção do Number(), mantendo como String (UUID)
-    const { error } = await supabase
+    // 1. Salva a campanha e retorna o ID criado (.select().single())
+    const { data: novaCampanha, error } = await supabase
       .from('campanhas')
       .insert([
         { 
@@ -90,6 +89,8 @@ export default function AutomacoesPage() {
           status: 'Aguardando Disparo' 
         }
       ])
+      .select()
+      .single()
 
     if (error) {
       alert("Erro ao salvar a campanha. Verifique o banco de dados.")
@@ -98,7 +99,23 @@ export default function AutomacoesPage() {
       return
     }
 
-    alert("🎉 Campanha salva com sucesso! O histórico já foi atualizado.")
+    // 🔥 2. CHAMA O BACKEND PARA EFETUAR O DISPARO SMTP (O que faltou na resposta anterior)
+    try {
+      const resposta = await fetch('/api/disparo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campanhaId: novaCampanha.id }),
+      })
+
+      if (!resposta.ok) {
+        throw new Error('Falha na comunicação com a API de disparo')
+      }
+
+      alert("🎉 Campanha salva e e-mails disparados com sucesso!")
+    } catch (err) {
+      console.error("Erro no disparo:", err)
+      alert("⚠️ A campanha foi salva no banco, mas ocorreu um erro no envio do SMTP.")
+    }
     
     setEnviando(false)
     setAssunto('')
@@ -160,10 +177,8 @@ export default function AutomacoesPage() {
                 />
               </div>
 
-              {/* EDITOR VISUAL TURBINADO */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
-                
                 <div className="bg-white rounded-xl border border-slate-200 overflow-visible
                   [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
                   [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
@@ -195,9 +210,9 @@ export default function AutomacoesPage() {
                 className="w-full sm:w-auto px-8 py-4 rounded-xl font-black text-white bg-blue-600 hover:bg-blue-700 shadow-md disabled:opacity-50 flex items-center justify-center gap-3 transition-colors text-lg"
               >
                 {enviando ? (
-                  <><Loader2 className="size-5 animate-spin" /> Salvando...</>
+                  <><Loader2 className="size-5 animate-spin" /> Processando...</>
                 ) : (
-                  <><Send className="size-5" /> Salvar Campanha</>
+                  <><Send className="size-5" /> Enviar Campanha</>
                 )}
               </button>
             </div>
@@ -206,14 +221,12 @@ export default function AutomacoesPage() {
 
         {/* ÁREA DIREITA: HISTÓRICO */}
         <div className="space-y-6">
-          
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
             <h3 className="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2">
               <Clock className="size-5 text-slate-400" /> Histórico de Disparos
             </h3>
             
             <div className="space-y-4">
-              
               {carregandoHistorico ? (
                 <div className="flex justify-center p-4">
                    <Loader2 className="size-6 animate-spin text-blue-500" />
@@ -242,7 +255,6 @@ export default function AutomacoesPage() {
                   </div>
                 ))
               )}
-
             </div>
           </div>
 
@@ -256,7 +268,6 @@ export default function AutomacoesPage() {
               <li>• Não anexe arquivos pesados diretamente na mensagem, use links do Google Drive.</li>
             </ul>
           </div>
-
         </div>
       </div>
     </div>
