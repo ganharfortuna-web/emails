@@ -8,22 +8,22 @@ import {
   Settings 
 } from 'lucide-react'
 
-export default function DashboardOverview() {
+export default function DashboardPage() {
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto space-y-10">
       
-      <h2 className="text-3xl font-black text-slate-900">
-        Visão Geral das Métricas
-      </h2>
-      
-      <br />
-      
-      <p className="text-lg text-slate-600 mb-10">
-        Acompanhe o desempenho diário das suas campanhas e a saúde da sua infraestrutura de envios.
-      </p>
+      {/* CABEÇALHO */}
+      <div>
+        <h2 className="text-3xl font-black text-slate-900">
+          Visão Geral das Métricas
+        </h2>
+        <p className="text-lg text-slate-600 mt-2">
+          Acompanhe o desempenho diário das suas campanhas e a saúde da sua infraestrutura de envios.
+        </p>
+      </div>
       
       {/* CARDS DE MÉTRICAS */}
-      <div className="grid md:grid-cols-3 gap-6 mb-12">
+      <div className="grid md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-slate-600">E-mails Enviados Hoje</h3>
@@ -58,15 +58,13 @@ export default function DashboardOverview() {
         </div>
       </div>
 
+      {/* BLOCOS INFERIORES LADO A LADO */}
       <div className="grid md:grid-cols-2 gap-6">
         {/* RELATÓRIO DE CLIQUES */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
-          <h3 className="text-xl font-bold text-slate-900">
+          <h3 className="text-xl font-bold text-slate-900 mb-2">
             Relatório Rápido de Cliques
           </h3>
-          
-          <br />
-          
           <p className="text-slate-600 mb-8">
             Acompanhe quais foram os links mais clicados nas suas últimas campanhas de disparo.
           </p>
@@ -95,7 +93,7 @@ export default function DashboardOverview() {
 
         {/* CONFIGURAÇÕES DE SMTP */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-2">
             <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <Server className="size-5 text-slate-700" />
               Configurações de SMTPs
@@ -110,7 +108,6 @@ export default function DashboardOverview() {
           </p>
           
           <div className="space-y-4">
-            {/* SMTP 1 - Sucesso */}
             <div className="flex items-center justify-between py-3 border-b border-slate-100">
               <div className="flex flex-col">
                 <span className="text-slate-700 font-bold">contato@suaempresa.com</span>
@@ -122,7 +119,6 @@ export default function DashboardOverview() {
               </div>
             </div>
 
-            {/* SMTP 2 - Sucesso */}
             <div className="flex items-center justify-between py-3 border-b border-slate-100">
               <div className="flex flex-col">
                 <span className="text-slate-700 font-bold">marketing@suaempresa.com</span>
@@ -134,7 +130,6 @@ export default function DashboardOverview() {
               </div>
             </div>
 
-            {/* SMTP 3 - Erro/Aviso (Conecta com a métrica no topo) */}
             <div className="flex items-center justify-between py-3">
               <div className="flex flex-col">
                 <span className="text-slate-700 font-bold">vendas@gmail.com</span>
