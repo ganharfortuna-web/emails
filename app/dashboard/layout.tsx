@@ -45,7 +45,6 @@ export default function DashboardLayout({
 
     checarAcesso()
 
-    // CORREÇÃO: Desestruturação correta do 'subscription' para Supabase v2
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
         router.push('/login')
@@ -68,7 +67,7 @@ export default function DashboardLayout({
     { nome: 'Listas', rota: '/dashboard/listas', icone: Mail },
     { nome: 'Automações', rota: '/dashboard/automacoes', icone: GitMerge },
     { nome: 'Páginas', rota: '/dashboard/paginas', icone: FileText },
-    { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings },
+    { nome: 'Configurações SMTP', rota: '/dashboard/configuracoes', icone: Settings },
   ]
 
   if (verificandoAcesso) {
