@@ -61,6 +61,7 @@ export default function DashboardLayout({
     router.push('/login')
   }
 
+  // AQUI ESTÃO OS LINKS DO MENU LATERAL
   const linksMenu = [
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
@@ -82,7 +83,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-slate-50 flex">
       
-      {/* Menu Lateral (Desktop) */}
+      {/* Menu Lateral Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-slate-800 text-slate-300">
         <div className="p-6 border-b border-slate-800">
           <h1 className="text-xl font-black text-white">Sistema Envios</h1>
@@ -132,7 +133,7 @@ export default function DashboardLayout({
           </button>
         </header>
 
-        {/* Menu Mobile Aberto */}
+        {/* Menu Mobile */}
         {menuAberto && (
           <div className="md:hidden bg-slate-900 border-b border-slate-800 text-slate-300">
             <nav className="p-4 space-y-2">
@@ -163,7 +164,6 @@ export default function DashboardLayout({
           </div>
         )}
 
-        {/* Área onde as páginas vão renderizar */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
           {children}
         </div>

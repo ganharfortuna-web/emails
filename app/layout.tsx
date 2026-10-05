@@ -1,10 +1,14 @@
-import './globals.css'
 import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
+import './globals.css'
 
-// O Next.js injeta isso automaticamente no <head>
+// Instância da fonte Inter (resolve o aviso em inter.className)
+const inter = Inter({ subsets: ['latin'] })
+
+// Metadados da aplicação para abas e SEO
 export const metadata: Metadata = {
-  title: 'Título do Seu Projeto',
-  description: 'Descrição para aparecer no Google',
+  title: 'Sistema Envios | Dashboard',
+  description: 'Plataforma para automação e disparo de e-mails.',
 }
 
 export default function RootLayout({
@@ -14,7 +18,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR">
-      <body>{children}</body>
+      <body className={inter.className}>
+        {children}
+      </body>
     </html>
   )
 }
