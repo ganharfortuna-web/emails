@@ -61,7 +61,7 @@ export default function DashboardLayout({
     router.push('/login')
   }
 
-  // AQUI ESTÃO OS LINKS DO MENU LATERAL
+  // Links do Menu Lateral com a opção "Configurações SMTP" incluída
   const linksMenu = [
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
