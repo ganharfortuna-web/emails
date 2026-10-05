@@ -1,3 +1,7 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { createClient } from '@supabase/supabase-js'
 import { 
   MailCheck, 
   MousePointerClick, 
@@ -5,10 +9,36 @@ import {
   Server, 
   CheckCircle2, 
   XCircle, 
-  Settings 
+  Settings,
+  Loader2
 } from 'lucide-react'
 
+// Inicializa o Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
 export default function DashboardPage() {
+  const [servidores, setServidores] = useState<any[]>([])
+  const [carregandoSmtp, setCarregandoSmtp] = useState(true)
+
+  useEffect(() => {
+    buscarServidores()
+  }, [])
+
+  const buscarServidores = async () => {
+    setCarregandoSmtp(true)
+    // Busca os 3 últimos servidores cadastrados para o resumo do dashboard
+    const { data } = await supabase
+      .from('servidores_email')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(3)
+    
+    if (data) setServidores(data)
+    setCarregandoSmtp(false)
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-10">
       
@@ -108,38 +138,28 @@ export default function DashboardPage() {
           </p>
           
           <div className="space-y-4">
-            <div className="flex items-center justify-between py-3 border-b border-slate-100">
-              <div className="flex flex-col">
-                <span className="text-slate-700 font-bold">contato@suaempresa.com</span>
-                <span className="text-xs text-slate-400 mt-1 font-medium">smtp.hostinger.com • Porta 465</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-bold border border-emerald-100">
-                <CheckCircle2 className="size-4" />
-                Conectado
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between py-3 border-b border-slate-100">
-              <div className="flex flex-col">
-                <span className="text-slate-700 font-bold">marketing@suaempresa.com</span>
-                <span className="text-xs text-slate-400 mt-1 font-medium">smtp.sendgrid.net • Porta 587</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-bold border border-emerald-100">
-                <CheckCircle2 className="size-4" />
-                Conectado
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between py-3">
-              <div className="flex flex-col">
-                <span className="text-slate-700 font-bold">vendas@gmail.com</span>
-                <span className="text-xs text-slate-400 mt-1 font-medium">smtp.gmail.com • Porta 465</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-red-50 text-red-700 px-3 py-1.5 rounded-full text-sm font-bold border border-red-100">
-                <XCircle className="size-4" />
-                Reconectar
-              </div>
-            </div>
+            {carregandoSmtp ? (
+               <div className="flex justify-center p-4">
+                 <Loader2 className="size-6 animate-spin text-blue-500" />
+               </div>
+            ) : servidores.length === 0 ? (
+               <p className="text-sm text-slate-500 text-center py-4">Nenhum servidor cadastrado.</p>
+            ) : (
+              servidores.map((servidor) => (
+                <div key={servidor.id} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0">
+                  <div className="flex flex-col">
+                    <span className="text-slate-700 font-bold">{servidor.usuario}</span>
+                    <span className="text-xs text-slate-400 mt-1 font-medium">
+                      {servidor.tipo === 'smtp' ? `${servidor.host} • Porta ${servidor.porta}` : 'Google Gmail'}
+                    </span>
+                  </div>
+                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold border ${servidor.ativo ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
+                    {servidor.ativo ? <CheckCircle2 className="size-4" /> : <XCircle className="size-4" />}
+                    {servidor.ativo ? 'Conectado' : 'Pausado'}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
