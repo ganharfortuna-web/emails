@@ -61,14 +61,14 @@ export default function DashboardLayout({
     router.push('/login')
   }
 
-  // Links do Menu Lateral com a opção "Configurações SMTP" incluída
+  // Links do Menu Lateral com a opção "Configurações" vinculada à rota /dashboard/configuracoes
   const linksMenu = [
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
     { nome: 'Listas', rota: '/dashboard/listas', icone: Mail },
     { nome: 'Automações', rota: '/dashboard/automacoes', icone: GitMerge },
     { nome: 'Páginas', rota: '/dashboard/paginas', icone: FileText },
-    { nome: 'Configurações SMTP', rota: '/dashboard/configuracoes', icone: Settings },
+    { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings },
   ]
 
   if (verificandoAcesso) {
@@ -92,7 +92,7 @@ export default function DashboardLayout({
         <nav className="flex-1 p-4 space-y-2">
           {linksMenu.map((link) => {
             const Icone = link.icone
-            const ativo = pathname === link.rota
+            const ativo = pathname === link.rota || (link.rota !== '/dashboard' && pathname.startsWith(link.rota))
             
             return (
               <Link 
@@ -139,13 +139,14 @@ export default function DashboardLayout({
             <nav className="p-4 space-y-2">
               {linksMenu.map((link) => {
                 const Icone = link.icone
+                const ativo = pathname === link.rota || (link.rota !== '/dashboard' && pathname.startsWith(link.rota))
                 return (
                   <Link 
                     key={link.nome} 
                     href={link.rota}
                     onClick={() => setMenuAberto(false)}
                     className={`flex items-center gap-3 px-4 py-3 rounded-lg ${
-                      pathname === link.rota ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-slate-800 hover:text-white'
+                      ativo ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-slate-800 hover:text-white'
                     }`}
                   >
                     <Icone className="size-5" />
