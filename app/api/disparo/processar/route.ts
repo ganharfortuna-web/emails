@@ -49,14 +49,18 @@ export async function POST(request: Request) {
     }
 
     if (!fila || fila.length === 0) {
-      if (campanhaId) {
-        await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaId)
-      }
+      // Nada pendente: marca TODAS as campanhas que estavam em processamento como Enviada
+      await supabase
+        .from('campanhas')
+        .update({ status: 'Enviada' })
+        .in('status', ['Em Fila', 'Enviando...', 'Aguardando Disparo'])
+
       return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: 0, done: true })
     }
 
     let enviados = 0
     let accountIndex = 0
+    const campaignIdsProcessadas = new Set<string | number>()
 
     for (const item of fila) {
       const contaAtual = contas[accountIndex % contas.length]
@@ -97,6 +101,8 @@ export async function POST(request: Request) {
 
         contaAtual.sent_today = (contaAtual.sent_today || 0) + 1
         enviados++
+
+        if (item.campaign_id) campaignIdsProcessadas.add(item.campaign_id)
       } catch (err: any) {
         await supabase
           .from('email_queue')
@@ -105,6 +111,7 @@ export async function POST(request: Request) {
       }
     }
 
+    // Conta restantes
     let countQuery = supabase
       .from('email_queue')
       .select('*', { count: 'exact', head: true })
@@ -114,7 +121,16 @@ export async function POST(request: Request) {
     const { count: restantes } = await countQuery
     const done = (restantes || 0) === 0
 
-    if (campanhaId) {
+    // Atualiza status de TODAS as campanhas processadas neste lote
+    for (const cid of campaignIdsProcessadas) {
+      await supabase
+        .from('campanhas')
+        .update({ status: done ? 'Enviada' : 'Enviando...' })
+        .eq('id', cid)
+    }
+
+    // Se foi passado campanhaId específico, garante atualização
+    if (campanhaId && !campaignIdsProcessadas.has(campanhaId)) {
       await supabase
         .from('campanhas')
         .update({ status: done ? 'Enviada' : 'Enviando...' })

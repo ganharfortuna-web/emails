@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil } from 'lucide-react'
+import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -36,6 +36,7 @@ export default function AutomacoesPage() {
   const [assunto, setAssunto] = useState('')
   const [mensagem, setMensagem] = useState('') 
   const [scheduledAt, setScheduledAt] = useState('') 
+  const [enviarImediato, setEnviarImediato] = useState(true)
   const [enviando, setEnviando] = useState(false)
 
   // Seleção de campanhas
@@ -46,14 +47,16 @@ export default function AutomacoesPage() {
   const [novoTitulo, setNovoTitulo] = useState('')
 
   // Estatísticas
-  const [stats, setStats] = useState<Record<string, { abertos: number; clicados: number; total: number }>>({})
+  const [stats, setStats] = useState<Record<string, { abertos: number; clicados: number; total: number; enviados: number }>>({})
+
+  // Progresso de envio
+  const [progresso, setProgresso] = useState<{ enviados: number; restantes: number } | null>(null)
 
   useEffect(() => {
     buscarListas()
     buscarCampanhas() 
   }, [])
 
-  // Carrega estatísticas quando as campanhas mudam
   useEffect(() => {
     if (campanhas.length > 0) carregarStats()
   }, [campanhas])
@@ -74,24 +77,77 @@ export default function AutomacoesPage() {
 
   // Busca estatísticas de cada campanha
   const carregarStats = async () => {
+    if (campanhas.length === 0) return
     const ids = campanhas.map(c => c.id)
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('email_queue')
       .select('campaign_id, opened_at, clicked_at, status')
       .in('campaign_id', ids)
 
+    if (error) {
+      console.error('Erro ao carregar stats:', error)
+      return
+    }
+
     if (data) {
-      const agrupado: Record<string, { abertos: number; clicados: number; total: number }> = {}
+      const agrupado: Record<string, { abertos: number; clicados: number; total: number; enviados: number }> = {}
+
+      for (const c of campanhas) {
+        agrupado[c.id] = { abertos: 0, clicados: 0, total: 0, enviados: 0 }
+      }
+
       for (const item of data) {
-        if (!agrupado[item.campaign_id]) {
-          agrupado[item.campaign_id] = { abertos: 0, clicados: 0, total: 0 }
+        const key = String(item.campaign_id)
+        if (!agrupado[key]) {
+          agrupado[key] = { abertos: 0, clicados: 0, total: 0, enviados: 0 }
         }
-        agrupado[item.campaign_id].total++
-        if (item.opened_at) agrupado[item.campaign_id].abertos++
-        if (item.clicked_at) agrupado[item.campaign_id].clicados++
+        agrupado[key].total++
+        if (item.status === 'sent') agrupado[key].enviados++
+        if (item.opened_at) agrupado[key].abertos++
+        if (item.clicked_at) agrupado[key].clicados++
       }
       setStats(agrupado)
     }
+  }
+
+  // --- PROCESSA A FILA EM LOTES ---
+  const processarFila = async (campanhaId: string | number) => {
+    let totalEnviados = 0
+    let restantes = 1
+    let tentativas = 0
+
+    setProgresso({ enviados: 0, restantes: 0 })
+
+    while (restantes > 0 && tentativas < 200) {
+      try {
+        const r = await fetch('/api/disparo/processar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ campanhaId }),
+        })
+        const j = await r.json()
+
+        if (j.error && j.done) {
+          alert(`⏸️ Envio pausado: ${j.error}`)
+          break
+        }
+
+        totalEnviados += j.enviados || 0
+        restantes = j.restantes || 0
+        setProgresso({ enviados: totalEnviados, restantes })
+
+        if (j.done) break
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      } catch (err) {
+        console.error('Erro no lote:', err)
+        await new Promise(resolve => setTimeout(resolve, 3000))
+      }
+      tentativas++
+    }
+
+    setProgresso(null)
+    return totalEnviados
   }
 
   const toggleSelecionada = (id: string) => {
@@ -119,9 +175,26 @@ export default function AutomacoesPage() {
     buscarCampanhas()
   }
 
-  // --- REENVIAR PARA QUEM NÃO ABRIU (com edição de título) ---
-  const abrirModalReenvio = (campanha: any) => {
-    setModalReenvio(campanha)
+  // --- REENVIAR PARA QUEM NÃO ABRIU ---
+  const abrirModalReenvio = async (campanha: any) => {
+    const { data } = await supabase
+      .from('email_queue')
+      .select('id, opened_at')
+      .eq('campaign_id', campanha.id)
+      .eq('status', 'sent')
+
+    if (!data || data.length === 0) {
+      alert('⚠️ Esta campanha ainda não foi enviada. Nada para reenviar.')
+      return
+    }
+
+    const naoAbriram = data.filter(d => !d.opened_at).length
+    if (naoAbriram === 0) {
+      alert('🎉 Todos já abriram! Nada para reenviar.')
+      return
+    }
+
+    setModalReenvio({ ...campanha, totalNaoAbriram: naoAbriram })
     setNovoTitulo(`[REENVIO] ${campanha.assunto}`)
   }
 
@@ -165,9 +238,13 @@ export default function AutomacoesPage() {
     await supabase.from('email_queue').insert(fila)
     await supabase.from('campanhas').update({ total_sent: fila.length }).eq('id', nova.id)
 
-    alert(`✅ ${fila.length} e-mails de reenvio na fila!`)
     setModalReenvio(null)
     setNovoTitulo('')
+    buscarCampanhas()
+
+    // Dispara imediatamente
+    const total = await processarFila(nova.id)
+    alert(`✅ Reenvio concluído! ${total} e-mails processados.`)
     buscarCampanhas()
   }
 
@@ -200,25 +277,34 @@ export default function AutomacoesPage() {
       return
     }
 
+    // Enfileira
     try {
-      const resposta = await fetch('/api/disparo', {
+      const r = await fetch('/api/disparo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campanhaId: novaCampanha.id }),
       })
+      const j = await r.json()
 
-      const json = await resposta.json()
-
-      if (!resposta.ok) {
-        alert(`⚠️ Campanha salva, mas houve erro no disparo:\n${json.error || 'erro desconhecido'}\n${json.detalhe || ''}`)
-      } else if (scheduledAt) {
-        alert(`📅 Campanha agendada para ${new Date(scheduledAt).toLocaleString('pt-BR')}`)
-      } else {
-        alert("🎉 Campanha salva e e-mails na fila para envio!")
+      if (!r.ok) {
+        alert(`⚠️ Campanha salva, mas houve erro ao enfileirar:\n${j.error || 'erro'} ${j.detalhe || ''}`)
+        setEnviando(false)
+        return
       }
     } catch (err) {
-      console.error("Erro no disparo:", err)
       alert("⚠️ Campanha salva, mas falhou ao enfileirar.")
+      setEnviando(false)
+      return
+    }
+
+    // Se for agendada, só enfileira
+    if (scheduledAt) {
+      alert(`📅 Campanha agendada para ${new Date(scheduledAt).toLocaleString('pt-BR')}`)
+    } else if (enviarImediato) {
+      const total = await processarFila(novaCampanha.id)
+      alert(`🎉 Campanha enviada! ${total} e-mails processados.`)
+    } else {
+      alert("✅ Campanha enfileirada. Será enviada no próximo ciclo do cron.")
     }
     
     setEnviando(false)
@@ -282,6 +368,22 @@ export default function AutomacoesPage() {
                 <p className="text-xs text-slate-500 mt-1">Deixe vazio para enviar assim que possível.</p>
               </div>
 
+              {!scheduledAt && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
+                  <input type="checkbox" id="imediato" checked={enviarImediato}
+                    onChange={e => setEnviarImediato(e.target.checked)}
+                    className="mt-1 size-5 cursor-pointer accent-blue-600" />
+                  <label htmlFor="imediato" className="cursor-pointer">
+                    <p className="font-bold text-blue-900 text-sm flex items-center gap-1">
+                      <Zap className="size-4" /> Enviar imediatamente (em lotes de 10)
+                    </p>
+                    <p className="text-xs text-blue-700 mt-1">
+                      Respeita o limite de 450/dia por conta Gmail. Recomendado para listas até ~500 contatos.
+                    </p>
+                  </label>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
                 <div className="bg-white rounded-xl border border-slate-200 overflow-visible
@@ -300,7 +402,7 @@ export default function AutomacoesPage() {
               <button type="submit" disabled={enviando}
                 className="w-full sm:w-auto px-8 py-4 rounded-xl font-black text-white bg-blue-600 hover:bg-blue-700 shadow-md disabled:opacity-50 flex items-center justify-center gap-3 transition-colors text-lg">
                 {enviando ? <><Loader2 className="size-5 animate-spin" /> Processando...</> 
-                          : <><Send className="size-5" /> {scheduledAt ? 'Agendar Campanha' : 'Enviar Campanha'}</>}
+                          : <><Send className="size-5" /> {scheduledAt ? 'Agendar Campanha' : (enviarImediato ? 'Enviar Agora' : 'Enfileirar')}</>}
               </button>
             </div>
           </form>
@@ -321,7 +423,6 @@ export default function AutomacoesPage() {
               )}
             </div>
 
-            {/* Barra de ações em lote */}
             {selecionadas.size > 0 && (
               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
                 <span className="text-sm font-bold text-blue-800">{selecionadas.size} selecionada(s)</span>
@@ -342,8 +443,9 @@ export default function AutomacoesPage() {
               ) : (
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
-                  const st = stats[campanha.id] || { abertos: 0, clicados: 0, total: 0 }
+                  const st = stats[campanha.id] || { abertos: 0, clicados: 0, total: 0, enviados: 0 }
                   const corStatus = campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
+                    : campanha.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700'
                     : campanha.status === 'Em Fila' ? 'bg-blue-100 text-blue-700'
                     : campanha.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700'
                     : 'bg-amber-100 text-amber-700'
@@ -377,25 +479,49 @@ export default function AutomacoesPage() {
 
                           {/* ESTATÍSTICAS */}
                           {st.total > 0 && (
-                            <div className="mt-2 flex items-center gap-3 text-xs font-bold">
-                              <span className="flex items-center gap-1 text-slate-600">
+                            <div className="mt-2 flex items-center gap-3 text-xs font-bold flex-wrap">
+                              <span className="flex items-center gap-1 text-slate-600" title="Total">
                                 <Mail className="size-3" /> {st.total}
                               </span>
-                              <span className="flex items-center gap-1 text-emerald-600">
-                                <Eye className="size-3" /> {st.abertos} abertos
+                              <span className="flex items-center gap-1 text-blue-600" title="Enviados">
+                                <Send className="size-3" /> {st.enviados}
                               </span>
-                              <span className="flex items-center gap-1 text-blue-600">
-                                <MousePointerClick className="size-3" /> {st.clicados} cliques
+                              <span className="flex items-center gap-1 text-emerald-600" title="Abertos">
+                                <Eye className="size-3" /> {st.abertos}
+                                {st.enviados > 0 && (
+                                  <span className="text-[10px] opacity-70">
+                                    ({Math.round((st.abertos / st.enviados) * 100)}%)
+                                  </span>
+                                )}
+                              </span>
+                              <span className="flex items-center gap-1 text-purple-600" title="Cliques">
+                                <MousePointerClick className="size-3" /> {st.clicados}
+                                {st.enviados > 0 && (
+                                  <span className="text-[10px] opacity-70">
+                                    ({Math.round((st.clicados / st.enviados) * 100)}%)
+                                  </span>
+                                )}
                               </span>
                             </div>
                           )}
 
                           {/* BOTÕES DE AÇÃO */}
-                          <div className="mt-2 flex items-center gap-3">
+                          <div className="mt-2 flex items-center gap-3 flex-wrap">
                             <button onClick={() => abrirModalReenvio(campanha)}
                               className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1">
                               <RotateCcw className="size-3" /> Reenviar p/ quem não abriu
                             </button>
+                            {(campanha.status === 'Em Fila' || campanha.status === 'Enviando...' || campanha.status === 'Aguardando Disparo') && (
+                              <button onClick={async () => {
+                                if (!confirm('Processar a fila desta campanha agora?')) return
+                                const total = await processarFila(campanha.id)
+                                alert(`✅ ${total} e-mails processados!`)
+                                buscarCampanhas()
+                              }}
+                                className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1">
+                                <Zap className="size-3" /> Enviar agora
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -418,15 +544,35 @@ export default function AutomacoesPage() {
               <LayoutTemplate className="size-4" /> Dicas
             </h3>
             <ul className="text-sm text-emerald-700 space-y-2 font-medium">
-              <li>• Evite palavras como "Grátis" ou "Promoção" no assunto.</li>
-              <li>• Use o agendamento para enviar em horários de pico.</li>
+              <li>• Envios imediatos rodam em lotes de 10 (seguro para Vercel e Gmail).</li>
+              <li>• Limite de ~450 e-mails por conta Gmail/dia.</li>
               <li>• Reenvie para quem não abriu após 3-4 dias.</li>
             </ul>
           </div>
         </div>
       </div>
 
-      {/* MODAL DE REENVIO COM EDIÇÃO DE TÍTULO */}
+      {/* MODAL DE PROGRESSO */}
+      {progresso && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+            <Loader2 className="size-12 animate-spin text-blue-600 mx-auto mb-4" />
+            <h2 className="text-xl font-black text-slate-900 mb-2">Enviando e-mails...</h2>
+            <p className="text-slate-600 mb-4">Não feche esta página até terminar.</p>
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+              <p className="text-3xl font-black text-blue-700">{progresso.enviados}</p>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mt-1">enviados</p>
+              {progresso.restantes > 0 && (
+                <p className="text-sm text-slate-600 mt-2">
+                  Restam <strong>{progresso.restantes}</strong> na fila
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE REENVIO */}
       {modalReenvio && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -435,7 +581,7 @@ export default function AutomacoesPage() {
                 <RotateCcw className="size-5" /> Reenviar para quem não abriu
               </h2>
               <p className="text-amber-700 text-sm mt-1">
-                Apenas quem ainda não abriu o e-mail será reenviado.
+                <strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram.
               </p>
             </div>
 
