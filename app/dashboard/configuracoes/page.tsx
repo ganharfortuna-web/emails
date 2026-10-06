@@ -30,7 +30,10 @@ export default function ConfiguracoesPage() {
 
   const carregarServidores = async () => {
     setCarregando(true)
-    const { data } = await supabase.from('servidores_email').select('*').order('created_at', { ascending: false })
+    const { data } = await supabase
+      .from('smtp_accounts')
+      .select('*')
+      .order('created_at', { ascending: false })
     if (data) setServidores(data)
     setCarregando(false)
   }
@@ -39,7 +42,17 @@ export default function ConfiguracoesPage() {
     e.preventDefault()
     setSalvando(true)
 
-    const { error } = await supabase.from('servidores_email').insert([novoServidor])
+    const { error } = await supabase.from('smtp_accounts').insert([{
+      sender_name:  novoServidor.nome,
+      type:         novoServidor.tipo,
+      host:         novoServidor.host || 'smtp.gmail.com',
+      port:         Number(novoServidor.porta) || 587,
+      email:        novoServidor.usuario,
+      app_password: novoServidor.senha,
+      sender_email: novoServidor.remetente,
+      is_active:    true,
+      sent_today:   0,
+    }])
 
     if (!error) {
       setModoCriacao(false)
@@ -47,18 +60,19 @@ export default function ConfiguracoesPage() {
       carregarServidores()
     } else {
       alert('Erro ao salvar o servidor. Verifique sua conexão.')
+      console.error(error)
     }
     setSalvando(false)
   }
 
   const alternarStatus = async (id: string, statusAtual: boolean) => {
-    await supabase.from('servidores_email').update({ ativo: !statusAtual }).eq('id', id)
+    await supabase.from('smtp_accounts').update({ is_active: !statusAtual }).eq('id', id)
     carregarServidores()
   }
 
   const deletarServidor = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este servidor permanentemente?')) return
-    await supabase.from('servidores_email').delete().eq('id', id)
+    await supabase.from('smtp_accounts').delete().eq('id', id)
     carregarServidores()
   }
 
@@ -150,24 +164,24 @@ export default function ConfiguracoesPage() {
            </div>
         ) : (
           servidores.map(servidor => (
-            <div key={servidor.id} className={`bg-white rounded-2xl border ${servidor.ativo ? 'border-slate-200 shadow-sm' : 'border-dashed border-slate-300 opacity-60'} p-6 transition-all`}>
+            <div key={servidor.id} className={`bg-white rounded-2xl border ${servidor.is_active ? 'border-slate-200 shadow-sm' : 'border-dashed border-slate-300 opacity-60'} p-6 transition-all`}>
               
               <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-xl ${servidor.tipo === 'gmail' ? 'bg-red-50 text-red-600' : 'bg-indigo-50 text-indigo-600'}`}>
-                    {servidor.tipo === 'gmail' ? <Mail className="size-6" /> : <Globe className="size-6" />}
+                  <div className={`p-3 rounded-xl ${servidor.type === 'gmail' ? 'bg-red-50 text-red-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                    {servidor.type === 'gmail' ? <Mail className="size-6" /> : <Globe className="size-6" />}
                   </div>
                   <div>
-                    <h4 className="font-black text-slate-800 text-lg leading-tight">{servidor.nome}</h4>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{servidor.tipo}</span>
+                    <h4 className="font-black text-slate-800 text-lg leading-tight">{servidor.sender_name}</h4>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{servidor.type}</span>
                   </div>
                 </div>
                 
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => alternarStatus(servidor.id, servidor.ativo)} 
-                    className={`p-2 rounded-lg transition-colors ${servidor.ativo ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} 
-                    title={servidor.ativo ? 'Pausar Conta' : 'Ativar Conta'}
+                    onClick={() => alternarStatus(servidor.id, servidor.is_active)} 
+                    className={`p-2 rounded-lg transition-colors ${servidor.is_active ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`} 
+                    title={servidor.is_active ? 'Pausar Conta' : 'Ativar Conta'}
                   >
                     <Power className="size-5" />
                   </button>
@@ -182,11 +196,12 @@ export default function ConfiguracoesPage() {
               </div>
               
               <div className="space-y-2 text-sm text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-100 break-words">
-                <p><strong className="text-slate-800">Login:</strong> {servidor.usuario}</p>
-                <p><strong className="text-slate-800">Remetente:</strong> {servidor.remetente}</p>
-                {servidor.tipo === 'smtp' && (
-                   <p><strong className="text-slate-800">Host:</strong> {servidor.host}:{servidor.porta}</p>
+                <p><strong className="text-slate-800">Login:</strong> {servidor.email}</p>
+                <p><strong className="text-slate-800">Remetente:</strong> {servidor.sender_email}</p>
+                {servidor.type === 'smtp' && (
+                   <p><strong className="text-slate-800">Host:</strong> {servidor.host}:{servidor.port}</p>
                 )}
+                <p><strong className="text-slate-800">Envios hoje:</strong> {servidor.sent_today || 0} / 450</p>
               </div>
             </div>
           ))
