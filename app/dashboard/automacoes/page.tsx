@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square } from 'lucide-react'
+import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -38,13 +38,25 @@ export default function AutomacoesPage() {
   const [scheduledAt, setScheduledAt] = useState('') 
   const [enviando, setEnviando] = useState(false)
 
-  // Seleção de campanhas no histórico
+  // Seleção de campanhas
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
+
+  // Modal de reenvio
+  const [modalReenvio, setModalReenvio] = useState<any>(null)
+  const [novoTitulo, setNovoTitulo] = useState('')
+
+  // Estatísticas
+  const [stats, setStats] = useState<Record<string, { abertos: number; clicados: number; total: number }>>({})
 
   useEffect(() => {
     buscarListas()
     buscarCampanhas() 
   }, [])
+
+  // Carrega estatísticas quando as campanhas mudam
+  useEffect(() => {
+    if (campanhas.length > 0) carregarStats()
+  }, [campanhas])
 
   const buscarListas = async () => {
     const { data } = await supabase.from('listas').select('id, nome, contatos(count)').order('nome')
@@ -58,6 +70,28 @@ export default function AutomacoesPage() {
       .order('created_at', { ascending: false }).limit(50)
     if (data) setCampanhas(data)
     setCarregandoHistorico(false)
+  }
+
+  // Busca estatísticas de cada campanha
+  const carregarStats = async () => {
+    const ids = campanhas.map(c => c.id)
+    const { data } = await supabase
+      .from('email_queue')
+      .select('campaign_id, opened_at, clicked_at, status')
+      .in('campaign_id', ids)
+
+    if (data) {
+      const agrupado: Record<string, { abertos: number; clicados: number; total: number }> = {}
+      for (const item of data) {
+        if (!agrupado[item.campaign_id]) {
+          agrupado[item.campaign_id] = { abertos: 0, clicados: 0, total: 0 }
+        }
+        agrupado[item.campaign_id].total++
+        if (item.opened_at) agrupado[item.campaign_id].abertos++
+        if (item.clicked_at) agrupado[item.campaign_id].clicados++
+      }
+      setStats(agrupado)
+    }
   }
 
   const toggleSelecionada = (id: string) => {
@@ -85,40 +119,45 @@ export default function AutomacoesPage() {
     buscarCampanhas()
   }
 
-  // --- REENVIAR PARA QUEM NÃO ABRIU ---
-  const reenviarNaoAbriram = async (campanhaId: string) => {
-    if (!confirm('Reenviar para todos que ainda NÃO abriram o e-mail?')) return
+  // --- REENVIAR PARA QUEM NÃO ABRIU (com edição de título) ---
+  const abrirModalReenvio = (campanha: any) => {
+    setModalReenvio(campanha)
+    setNovoTitulo(`[REENVIO] ${campanha.assunto}`)
+  }
+
+  const confirmarReenvio = async () => {
+    if (!modalReenvio) return
 
     const { data: originais } = await supabase
       .from('email_queue')
       .select('recipient_email, recipient_name, subject, body')
-      .eq('campaign_id', campanhaId)
+      .eq('campaign_id', modalReenvio.id)
       .eq('status', 'sent')
       .is('opened_at', null)
 
     if (!originais || originais.length === 0) {
       alert('🎉 Todos já abriram! Nada para reenviar.')
+      setModalReenvio(null)
       return
     }
 
-    // Cria uma nova campanha de reenvio
     const { data: nova, error } = await supabase
       .from('campanhas')
       .insert([{
-        lista_id: (await supabase.from('campanhas').select('lista_id').eq('id', campanhaId).single()).data?.lista_id,
-        assunto: `[REENVIO] ${originais[0].subject}`,
+        lista_id: modalReenvio.lista_id,
+        assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`,
         mensagem: originais[0].body,
         status: 'Em Fila',
       }])
       .select().single()
 
-    if (error || !nova) { alert('Erro ao criar campanha de reenvio.'); return }
+    if (error || !nova) { alert('Erro ao criar campanha de reenvio.'); setModalReenvio(null); return }
 
     const fila = originais.map(o => ({
       campaign_id: nova.id,
       recipient_email: o.recipient_email,
       recipient_name: o.recipient_name,
-      subject: `[REENVIO] ${o.subject}`,
+      subject: novoTitulo || `[REENVIO] ${o.subject}`,
       body: o.body,
       status: 'pending',
     }))
@@ -127,6 +166,8 @@ export default function AutomacoesPage() {
     await supabase.from('campanhas').update({ total_sent: fila.length }).eq('id', nova.id)
 
     alert(`✅ ${fila.length} e-mails de reenvio na fila!`)
+    setModalReenvio(null)
+    setNovoTitulo('')
     buscarCampanhas()
   }
 
@@ -301,6 +342,7 @@ export default function AutomacoesPage() {
               ) : (
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
+                  const st = stats[campanha.id] || { abertos: 0, clicados: 0, total: 0 }
                   const corStatus = campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
                     : campanha.status === 'Em Fila' ? 'bg-blue-100 text-blue-700'
                     : campanha.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700'
@@ -332,10 +374,29 @@ export default function AutomacoesPage() {
                               📅 {new Date(campanha.scheduled_at).toLocaleString('pt-BR')}
                             </p>
                           )}
-                          <button onClick={() => reenviarNaoAbriram(campanha.id)}
-                            className="mt-2 text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1">
-                            <RotateCcw className="size-3" /> Reenviar p/ quem não abriu
-                          </button>
+
+                          {/* ESTATÍSTICAS */}
+                          {st.total > 0 && (
+                            <div className="mt-2 flex items-center gap-3 text-xs font-bold">
+                              <span className="flex items-center gap-1 text-slate-600">
+                                <Mail className="size-3" /> {st.total}
+                              </span>
+                              <span className="flex items-center gap-1 text-emerald-600">
+                                <Eye className="size-3" /> {st.abertos} abertos
+                              </span>
+                              <span className="flex items-center gap-1 text-blue-600">
+                                <MousePointerClick className="size-3" /> {st.clicados} cliques
+                              </span>
+                            </div>
+                          )}
+
+                          {/* BOTÕES DE AÇÃO */}
+                          <div className="mt-2 flex items-center gap-3">
+                            <button onClick={() => abrirModalReenvio(campanha)}
+                              className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1">
+                              <RotateCcw className="size-3" /> Reenviar p/ quem não abriu
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -364,6 +425,50 @@ export default function AutomacoesPage() {
           </div>
         </div>
       </div>
+
+      {/* MODAL DE REENVIO COM EDIÇÃO DE TÍTULO */}
+      {modalReenvio && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-slate-100 bg-amber-50">
+              <h2 className="text-xl font-black text-amber-900 flex items-center gap-2">
+                <RotateCcw className="size-5" /> Reenviar para quem não abriu
+              </h2>
+              <p className="text-amber-700 text-sm mt-1">
+                Apenas quem ainda não abriu o e-mail será reenviado.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-xs font-bold text-slate-500 mb-1">Título original:</p>
+                <p className="text-sm font-bold text-slate-800">{modalReenvio.assunto}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Pencil className="size-4 text-slate-500" />
+                  Novo título do e-mail (editável)
+                </label>
+                <input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)}
+                  className="w-full p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-slate-700 font-medium" />
+                <p className="text-xs text-slate-500 mt-1">Personalize o título do reenvio para chamar mais atenção.</p>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => { setModalReenvio(null); setNovoTitulo('') }}
+                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={confirmarReenvio}
+                className="px-6 py-2.5 rounded-xl font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md flex items-center gap-2">
+                <RotateCcw className="size-4" /> Reenviar agora
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

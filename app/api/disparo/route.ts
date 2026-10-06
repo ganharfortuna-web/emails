@@ -36,11 +36,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Nenhum contato na lista' }, { status: 400 })
     }
 
-    // 3. Monta a fila
+    // 3. Monta a fila (usa o ID da campanha como veio do banco)
     const fila = contatos
       .filter(c => c.email && c.email.includes('@'))
       .map(contato => ({
-        campaign_id: campanhaId,
+        campaign_id: campanha.id,  // usa o ID real da campanha
         recipient_email: contato.email,
         recipient_name: contato.nome || '',
         subject: campanha.assunto,
@@ -66,11 +66,17 @@ export async function POST(request: Request) {
 
     // 5. Status da campanha
     const novoStatus = campanha.scheduled_at ? 'Agendada' : 'Em Fila'
-    await supabase.from('campanhas').update({ status: novoStatus, total_sent: fila.length }).eq('id', campanhaId)
+    await supabase.from('campanhas').update({ 
+      status: novoStatus, 
+      total_sent: fila.length 
+    }).eq('id', campanha.id)
 
     return NextResponse.json({ success: true, total: fila.length, status: novoStatus })
   } catch (error: any) {
     console.error('ERRO /api/disparo:', error)
-    return NextResponse.json({ error: error.message, stack: error.stack?.split('\n').slice(0,3).join(' | ') }, { status: 500 })
+    return NextResponse.json({ 
+      error: error.message,
+      stack: error.stack?.split('\n').slice(0,3).join(' | ')
+    }, { status: 500 })
   }
 }
