@@ -78,7 +78,7 @@ export async function GET(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // Reescreve links + injeta pixel
+      // Reescreve links + injeta pixel + footer de descadastro
       let htmlFinal = item.body || ''
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
@@ -86,7 +86,18 @@ export async function GET(request: Request) {
           (_m: string, url: string) =>
             `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`
         )
-        htmlFinal += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
+
+        const pixel = `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
+
+        const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email)}`
+        const footer = `
+<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" />
+<p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">
+  Você está recebendo este e-mail porque se cadastrou em nossa lista.<br/>
+  Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.
+</p>`
+
+        htmlFinal += footer + pixel
       }
 
       try {
@@ -102,7 +113,6 @@ export async function GET(request: Request) {
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', item.id)
 
-        // ✅ Update direto (sem RPC)
         await supabase
           .from('smtp_accounts')
           .update({ sent_today: (contaAtual.sent_today || 0) + 1 })

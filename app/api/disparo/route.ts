@@ -25,22 +25,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Campanha não encontrada', detalhe: campanhaError?.message }, { status: 404 })
     }
 
-    // 2. Busca contatos da lista
+    // 2. Busca contatos da lista, ignorando descadastrados
     const { data: contatos, error: contatosError } = await supabase
-      .from('contatos').select('id, email, nome').eq('lista_id', campanha.lista_id)
+      .from('contatos')
+      .select('id, email, nome, status')
+      .eq('lista_id', campanha.lista_id)
+      .neq('status', 'descadastrado')
 
     if (contatosError) {
       return NextResponse.json({ error: 'Erro ao buscar contatos', detalhe: contatosError.message }, { status: 500 })
     }
     if (!contatos || contatos.length === 0) {
-      return NextResponse.json({ error: 'Nenhum contato na lista' }, { status: 400 })
+      return NextResponse.json({ error: 'Nenhum contato ativo na lista (ou todos descadastrados)' }, { status: 400 })
     }
 
-    // 3. Monta a fila (usa o ID da campanha como veio do banco)
+    // 3. Monta a fila
     const fila = contatos
       .filter(c => c.email && c.email.includes('@'))
       .map(contato => ({
-        campaign_id: campanha.id,  // usa o ID real da campanha
+        campaign_id: campanha.id,
         recipient_email: contato.email,
         recipient_name: contato.nome || '',
         subject: campanha.assunto,
