@@ -2,11 +2,7 @@ import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 
-// Inicializa o cliente do Supabase
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Use a Service Role Key para ter permissão total nas tabelas da fila
-)
+// ⚠️ NÃO inicialize o Supabase aqui fora. Deixe dentro da função.
 
 export async function GET(request: Request) {
   // 1. Validação de segurança para garantir que apenas o Cron chame esta rota
@@ -15,8 +11,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
 
+  // 2. Inicializa o Supabase AQUI DENTRO (roda em runtime, não no build)
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !supabaseKey) {
+    return NextResponse.json(
+      { error: 'Variáveis de ambiente do Supabase não configuradas.' },
+      { status: 500 }
+    )
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey)
+
   try {
-    // 2. Busca até 20 e-mails pendentes na fila (evita estouro de timeout da Vercel)
+    // 3. Busca até 20 e-mails pendentes na fila
     const { data: fila, error: filaError } = await supabase
       .from('email_queue')
       .select('*, campaign:campaigns(*)')
@@ -27,37 +36,37 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Nenhum e-mail pendente na fila.' })
     }
 
-    // 3. Busca contas SMTP/Gmail ativas com limite diário disponível
+    // 4. Busca contas SMTP/Gmail ativas com limite diário disponível
     const { data: contas, error: contasError } = await supabase
       .from('smtp_accounts')
       .select('*')
       .eq('is_active', true)
-      .lt('sent_today', 450) // Limite seguro do Gmail por conta (máx 500/dia)
+      .lt('sent_today', 450)
 
     if (contasError || !contas || contas.length === 0) {
-      return NextResponse.json({ error: 'Nenhuma conta de envio disponível ou limites diários atingidos.' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Nenhuma conta de envio disponível ou limites diários atingidos.' },
+        { status: 400 }
+      )
     }
 
     let accountIndex = 0
 
-    // 4. Processa os e-mails do lote
+    // 5. Processa os e-mails do lote
     for (const item of fila) {
-      // Rotaciona as contas entre os 50 Gmails e 3 SMTPs
       const contaAtual = contas[accountIndex % contas.length]
       accountIndex++
 
-      // Configura o transportador do Nodemailer dinamicamente
       const transporter = nodemailer.createTransport({
         host: contaAtual.host || 'smtp.gmail.com',
         port: contaAtual.port || 587,
         secure: contaAtual.port === 465,
         auth: {
           user: contaAtual.email,
-          pass: contaAtual.app_password, // Senha de App do Gmail ou credencial SMTP
+          pass: contaAtual.app_password,
         },
       })
 
-      // Injeta pixel de rastreio de abertura e reescreve links para cliques
       const trackingPixel = `<img src="${process.env.NEXT_PUBLIC_APP_URL}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`
       const htmlComRastreio = item.body + trackingPixel
 
@@ -69,20 +78,17 @@ export async function GET(request: Request) {
           html: htmlComRastreio,
         })
 
-        // Marca como enviado no Supabase
         await supabase
           .from('email_queue')
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', item.id)
 
-        // Incrementa o contador de envios do dia da conta utilizada
         await supabase
           .from('smtp_accounts')
           .update({ sent_today: contaAtual.sent_today + 1 })
           .eq('id', contaAtual.id)
 
       } catch (sendError: any) {
-        // Em caso de falha, registra o erro e marca para nova tentativa
         await supabase
           .from('email_queue')
           .update({ status: 'failed', error_log: sendError.message })
