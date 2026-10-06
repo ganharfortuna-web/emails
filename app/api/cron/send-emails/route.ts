@@ -10,7 +10,14 @@ export async function GET(request: Request) {
   const tokenHeader = request.headers.get('authorization')?.replace('Bearer ', '')
 
   const tokenRecebido = tokenHeader || tokenQuery
-  if (tokenRecebido !== process.env.CRON_SECRET) {
+  const tokenEsperado = process.env.CRON_SECRET
+
+  if (!tokenEsperado) {
+    console.error('❌ CRON_SECRET não configurado')
+    return NextResponse.json({ error: 'CRON_SECRET não configurado' }, { status: 500 })
+  }
+
+  if (tokenRecebido !== tokenEsperado) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
 
@@ -32,18 +39,19 @@ export async function GET(request: Request) {
       .eq('status', 'Agendada')
       .lte('scheduled_at', new Date().toISOString())
 
-    // 2. Pega contas ativas
+    // 2. Contas ativas ordenadas pela menos usada
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
       .eq('is_active', true)
       .lt('sent_today', 450)
+      .order('sent_today', { ascending: true })
 
     if (!contas || contas.length === 0) {
       return NextResponse.json({ message: 'Sem contas disponíveis.' })
     }
 
-    // 3. Pega lote de pendentes (30 por rodada)
+    // 3. Lote de 30 pendentes
     const { data: fila, error: filaError } = await supabase
       .from('email_queue')
       .select('*')
@@ -56,12 +64,12 @@ export async function GET(request: Request) {
     }
 
     let enviados = 0
-    let accountIndex = 0
     const campaignIds = new Set<string | number>()
 
     for (const item of fila) {
-      const contaAtual = contas[accountIndex % contas.length]
-      accountIndex++
+      // Rotaciona pelas contas ordenadas por menor uso
+      const contaAtual = contas[enviados % contas.length]
+      if (!contaAtual) continue
 
       const transporter = nodemailer.createTransport({
         host: contaAtual.host || 'smtp.gmail.com',
@@ -70,15 +78,16 @@ export async function GET(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // Reescreve links para rastreio
-      const htmlComLinks = (item.body || '').replace(
-        /href="(https?:\/\/[^"]+)"/g,
-        (_m: string, url: string) =>
-          `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`
-      )
-      // Pixel de abertura
-      const pixel = `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
-      const htmlFinal = htmlComLinks + pixel
+      // Reescreve links + injeta pixel
+      let htmlFinal = item.body || ''
+      if (baseUrl) {
+        htmlFinal = htmlFinal.replace(
+          /href="(https?:\/\/[^"]+)"/g,
+          (_m: string, url: string) =>
+            `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`
+        )
+        htmlFinal += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
+      }
 
       try {
         await transporter.sendMail({
@@ -93,6 +102,7 @@ export async function GET(request: Request) {
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', item.id)
 
+        // ✅ Update direto (sem RPC)
         await supabase
           .from('smtp_accounts')
           .update({ sent_today: (contaAtual.sent_today || 0) + 1 })
@@ -102,6 +112,7 @@ export async function GET(request: Request) {
         enviados++
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
+        console.error('Erro envio:', item.recipient_email, err.message)
         await supabase
           .from('email_queue')
           .update({ status: 'failed', error_log: err.message })
@@ -109,7 +120,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // 4. Atualiza status das campanhas processadas
+    // 4. Atualiza status das campanhas
     for (const cid of campaignIds) {
       const { count } = await supabase
         .from('email_queue')

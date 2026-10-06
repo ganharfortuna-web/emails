@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
-// Tamanho do lote — 10 é seguro para Vercel Hobby (10s timeout)
 const BATCH_SIZE = 10
 
 export async function POST(request: Request) {
@@ -21,7 +20,7 @@ export async function POST(request: Request) {
   try {
     const { campanhaId } = await request.json().catch(() => ({}))
 
-    // 1. Contas disponíveis, ORDENADAS pelas menos usadas hoje
+    // 1. Contas ativas ordenadas pela menos usada
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -31,12 +30,12 @@ export async function POST(request: Request) {
 
     if (!contas || contas.length === 0) {
       return NextResponse.json(
-        { error: 'Limite diário de todas as contas atingido.', done: true, restantes: 0 },
+        { error: 'Limite diário de todas as contas atingido.', done: true, restantes: 0, enviados: 0 },
         { status: 200 }
       )
     }
 
-    // 2. Próximo lote de pendentes
+    // 2. Próximo lote
     let query = supabase
       .from('email_queue')
       .select('*')
@@ -63,7 +62,6 @@ export async function POST(request: Request) {
     const campaignIds = new Set<string | number>()
 
     for (const item of fila) {
-      // Escolhe a conta menos usada do lote atual (round-robin sobre a lista já ordenada)
       const contaAtual = contas[enviados % contas.length]
       if (!contaAtual) continue
 
@@ -74,13 +72,15 @@ export async function POST(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      const htmlComLinks = (item.body || '').replace(
-        /href="(https?:\/\/[^"]+)"/g,
-        (_m: string, url: string) =>
-          `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`
-      )
-      const pixel = `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
-      const htmlFinal = htmlComLinks + pixel
+      let htmlFinal = item.body || ''
+      if (baseUrl) {
+        htmlFinal = htmlFinal.replace(
+          /href="(https?:\/\/[^"]+)"/g,
+          (_m: string, url: string) =>
+            `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`
+        )
+        htmlFinal += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
+      }
 
       try {
         await transporter.sendMail({
@@ -95,12 +95,17 @@ export async function POST(request: Request) {
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', item.id)
 
-        // 🔒 Incremento ATÔMICO via RPC (evita race condition)
-        await supabase.rpc('increment_sent_today', { account_id: contaAtual.id })
+        // ✅ Update direto (sem RPC)
+        await supabase
+          .from('smtp_accounts')
+          .update({ sent_today: (contaAtual.sent_today || 0) + 1 })
+          .eq('id', contaAtual.id)
 
+        contaAtual.sent_today = (contaAtual.sent_today || 0) + 1
         enviados++
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
+        console.error('Erro envio:', item.recipient_email, err.message)
         await supabase
           .from('email_queue')
           .update({ status: 'failed', error_log: err.message })
@@ -108,26 +113,37 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. Atualiza status das campanhas
-    for (const cid of campaignIds) {
-      const { count } = await supabase
-        .from('email_queue')
-        .select('*', { count: 'exact', head: true })
-        .eq('campaign_id', cid)
-        .eq('status', 'pending')
+    // 3. Quantos ainda restam
+    let countQuery = supabase
+      .from('email_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending')
+    if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
 
+    const { count: restantes } = await countQuery
+    const done = (restantes || 0) === 0
+
+    // 4. Atualiza status das campanhas
+    for (const cid of campaignIds) {
       await supabase
         .from('campanhas')
-        .update({ status: (count || 0) === 0 ? 'Enviada' : 'Enviando...' })
+        .update({ status: done ? 'Enviada' : 'Enviando...' })
         .eq('id', cid)
+    }
+
+    if (campanhaId && !campaignIds.has(campanhaId)) {
+      await supabase
+        .from('campanhas')
+        .update({ status: done ? 'Enviada' : 'Enviando...' })
+        .eq('id', campanhaId)
     }
 
     return NextResponse.json({
       success: true,
       processed: fila.length,
       enviados,
-      restantes: 0,
-      done: true,
+      restantes: restantes || 0,
+      done,
     })
   } catch (error: any) {
     console.error('ERRO /api/disparo/processar:', error)
