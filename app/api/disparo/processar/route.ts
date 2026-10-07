@@ -20,7 +20,35 @@ export async function POST(request: Request) {
   try {
     const { campanhaId } = await request.json().catch(() => ({}))
 
-    // 1. Contas ativas ordenadas pela menos usada
+    // 1. Se veio campanha específica, verifica se está pausada
+    if (campanhaId) {
+      const { data: camp } = await supabase
+        .from('campanhas')
+        .select('status')
+        .eq('id', campanhaId)
+        .single()
+
+      if (camp?.status === 'Pausada') {
+        return NextResponse.json({
+          success: true,
+          processed: 0,
+          enviados: 0,
+          restantes: 0,
+          done: false,
+          pausada: true,
+        })
+      }
+    }
+
+    // 2. Busca IDs das campanhas PAUSADAS (para ignorar)
+    const { data: pausadas } = await supabase
+      .from('campanhas')
+      .select('id')
+      .eq('status', 'Pausada')
+
+    const idsPausados = (pausadas || []).map((c: any) => c.id)
+
+    // 3. Contas ativas ordenadas pela menos usada
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -35,24 +63,29 @@ export async function POST(request: Request) {
       )
     }
 
-    // 2. Próximo lote
+    // 4. Busca próximo lote (busca 30 para poder filtrar pausados)
     let query = supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
-      .limit(BATCH_SIZE)
+      .limit(30)
 
     if (campanhaId) query = query.eq('campaign_id', campanhaId)
 
-    const { data: fila, error: filaError } = await query
+    const { data: filaRaw, error: filaError } = await query
 
     if (filaError) {
       return NextResponse.json({ error: filaError.message }, { status: 500 })
     }
 
-    if (!fila || fila.length === 0) {
-      if (campanhaId) {
+    // 5. Filtra pausadas e limita ao BATCH_SIZE
+    const fila = (filaRaw || [])
+      .filter(item => !idsPausados.includes(item.campaign_id))
+      .slice(0, BATCH_SIZE)
+
+    if (fila.length === 0) {
+      if (campanhaId && !idsPausados.includes(campanhaId)) {
         await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaId)
       }
       return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: 0, done: true })
@@ -124,25 +157,28 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. Quantos ainda restam
+    // 6. Quantos ainda restam (ignorando pausadas)
     let countQuery = supabase
       .from('email_queue')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending')
     if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
 
-    const { count: restantes } = await countQuery
-    const done = (restantes || 0) === 0
+    const { count: restantesRaw } = await countQuery
+    const restantes = restantesRaw || 0
+    const done = restantes === 0
 
-    // 4. Atualiza status das campanhas
+    // 7. Atualiza status das campanhas (só as que não estão pausadas)
     for (const cid of campaignIds) {
+      if (idsPausados.includes(cid)) continue
+
       await supabase
         .from('campanhas')
         .update({ status: done ? 'Enviada' : 'Enviando...' })
         .eq('id', cid)
     }
 
-    if (campanhaId && !campaignIds.has(campanhaId)) {
+    if (campanhaId && !campaignIds.has(campanhaId) && !idsPausados.includes(campanhaId)) {
       await supabase
         .from('campanhas')
         .update({ status: done ? 'Enviada' : 'Enviando...' })
@@ -153,7 +189,7 @@ export async function POST(request: Request) {
       success: true,
       processed: fila.length,
       enviados,
-      restantes: restantes || 0,
+      restantes,
       done,
     })
   } catch (error: any) {

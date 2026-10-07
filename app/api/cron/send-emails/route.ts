@@ -39,7 +39,15 @@ export async function GET(request: Request) {
       .eq('status', 'Agendada')
       .lte('scheduled_at', new Date().toISOString())
 
-    // 2. Contas ativas ordenadas pela menos usada
+    // 2. Busca IDs das campanhas PAUSADAS (para ignorar)
+    const { data: pausadas } = await supabase
+      .from('campanhas')
+      .select('id')
+      .eq('status', 'Pausada')
+
+    const idsPausados = (pausadas || []).map((c: any) => c.id)
+
+    // 3. Contas ativas ordenadas pela menos usada
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -51,23 +59,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Sem contas disponíveis.' })
     }
 
-    // 3. Lote de 30 pendentes
-    const { data: fila, error: filaError } = await supabase
+    // 4. Lote de 30 pendentes (busca 60 para poder filtrar pausados)
+    const { data: filaRaw, error: filaError } = await supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
-      .limit(30)
+      .limit(60)
 
-    if (filaError || !fila || fila.length === 0) {
+    if (filaError || !filaRaw || filaRaw.length === 0) {
       return NextResponse.json({ message: 'Nada pendente.' })
+    }
+
+    // 5. Filtra campanhas pausadas e limita a 30
+    const fila = filaRaw
+      .filter(item => !idsPausados.includes(item.campaign_id))
+      .slice(0, 30)
+
+    if (fila.length === 0) {
+      return NextResponse.json({ message: 'Todas as pendentes pertencem a campanhas pausadas.' })
     }
 
     let enviados = 0
     const campaignIds = new Set<string | number>()
 
     for (const item of fila) {
-      // Rotaciona pelas contas ordenadas por menor uso
       const contaAtual = contas[enviados % contas.length]
       if (!contaAtual) continue
 
@@ -130,8 +146,10 @@ export async function GET(request: Request) {
       }
     }
 
-    // 4. Atualiza status das campanhas
+    // 6. Atualiza status das campanhas (só se não estiver pausada)
     for (const cid of campaignIds) {
+      if (idsPausados.includes(cid)) continue
+
       const { count } = await supabase
         .from('email_queue')
         .select('*', { count: 'exact', head: true })
@@ -144,7 +162,7 @@ export async function GET(request: Request) {
         .eq('id', cid)
     }
 
-    return NextResponse.json({ success: true, processed: fila.length, enviados })
+    return NextResponse.json({ success: true, processed: fila.length, enviados, pausadas: idsPausados.length })
   } catch (error: any) {
     console.error('ERRO cron:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
