@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw } from 'lucide-react'
+import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Flame } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -27,6 +27,15 @@ const modulosEditor = {
   ],
 }
 
+type StatsItem = {
+  abertos: number
+  reabertos: number
+  clicados: number
+  total: number
+  enviados: number
+  pendentes: number
+}
+
 export default function AutomacoesPage() {
   const [listas, setListas] = useState<any[]>([])
   const [campanhas, setCampanhas] = useState<any[]>([])
@@ -43,7 +52,7 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
 
-  const [stats, setStats] = useState<Record<string, { abertos: number; abertosReais: number; clicados: number; total: number; enviados: number; pendentes: number }>>({})
+  const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
   useEffect(() => {
     buscarListas()
@@ -81,14 +90,14 @@ export default function AutomacoesPage() {
   const carregarStats = async () => {
     const { data, error } = await supabase
       .from('email_queue')
-      .select('campaign_id, opened_at, clicked_at, status, open_is_preview')
+      .select('campaign_id, opened_at, clicked_at, status, open_count')
 
     if (error || !data) return
 
-    const agrupado: Record<string, { abertos: number; abertosReais: number; clicados: number; total: number; enviados: number; pendentes: number }> = {}
+    const agrupado: Record<string, StatsItem> = {}
 
     for (const c of campanhas) {
-      agrupado[String(c.id)] = { abertos: 0, abertosReais: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
+      agrupado[String(c.id)] = { abertos: 0, reabertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
     }
 
     for (const item of data) {
@@ -99,15 +108,13 @@ export default function AutomacoesPage() {
       if (item.status === 'pending') agrupado[key].pendentes++
       if (item.opened_at) {
         agrupado[key].abertos++
-        // Só conta como "real" se NÃO for preview
-        if (!item.open_is_preview) agrupado[key].abertosReais++
+        if ((item.open_count || 1) > 1) agrupado[key].reabertos++
       }
       if (item.clicked_at) agrupado[key].clicados++
     }
     setStats(agrupado)
   }
 
-  // Dispara 1 lote só — o resto o cron externo pega
   const dispararUmLote = async (campanhaId: string | number) => {
     try {
       const r = await fetch('/api/disparo/processar', {
@@ -146,11 +153,11 @@ export default function AutomacoesPage() {
     buscarCampanhas()
   }
 
-  // --- REENVIAR PARA QUEM NÃO ABRIU ---
+  // --- REENVIAR PARA QUEM NÃO ABRIU (considera quem nunca abriu) ---
   const abrirModalReenvio = async (campanha: any) => {
     const { data } = await supabase
       .from('email_queue')
-      .select('id, opened_at, open_is_preview')
+      .select('id, opened_at')
       .eq('campaign_id', campanha.id)
       .eq('status', 'sent')
 
@@ -159,8 +166,7 @@ export default function AutomacoesPage() {
       return
     }
 
-    // Considera "não abriu" somente quem NÃO tem abertura real
-    const naoAbriram = data.filter(d => !d.opened_at || d.open_is_preview).length
+    const naoAbriram = data.filter(d => !d.opened_at).length
     if (naoAbriram === 0) {
       alert('🎉 Todos já abriram! Nada para reenviar.')
       return
@@ -175,12 +181,11 @@ export default function AutomacoesPage() {
 
     const { data: originais } = await supabase
       .from('email_queue')
-      .select('recipient_email, recipient_name, subject, body, opened_at, open_is_preview')
+      .select('recipient_email, recipient_name, subject, body, opened_at')
       .eq('campaign_id', modalReenvio.id)
       .eq('status', 'sent')
 
-    // Filtra no client: quem não abriu OU só teve preview
-    const naoAbriram = (originais || []).filter(o => !o.opened_at || o.open_is_preview)
+    const naoAbriram = (originais || []).filter(o => !o.opened_at)
 
     if (naoAbriram.length === 0) {
       alert('🎉 Todos já abriram!')
@@ -357,30 +362,29 @@ export default function AutomacoesPage() {
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
                 <div className="bg-white rounded-xl border border-slate-200 overflow-visible
-  [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
-  [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
-  [&_.ql-editor]:min-h-[350px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base
-  [&_.ql-tooltip]:!absolute [&_.ql-tooltip]:!bg-white [&_.ql-tooltip]:!text-slate-900 [&_.ql-tooltip]:!border [&_.ql-tooltip]:!border-slate-200 [&_.ql-tooltip]:!shadow-xl [&_.ql-tooltip]:!rounded-xl [&_.ql-tooltip]:!p-4 [&_.ql-tooltip]:!z-50
-  [&_.ql-tooltip_input]:!bg-white [&_.ql-tooltip_input]:!text-slate-900 [&_.ql-tooltip_input]:!border [&_.ql-tooltip_input]:!border-slate-300 [&_.ql-tooltip_input]:!rounded-md [&_.ql-tooltip_input]:!px-3 [&_.ql-tooltip_input]:!py-1.5 [&_.ql-tooltip_input]:!text-sm [&_.ql-tooltip_input]:focus:!outline-none [&_.ql-tooltip_input]:focus:!border-blue-500 [&_.ql-tooltip_input]:focus:!ring-1 [&_.ql-tooltip_input]:focus:!ring-blue-500
-  [&_.ql-tooltip_a]:!text-blue-600 [&_.ql-tooltip_a]:!font-bold [&_.ql-tooltip_a]:!ml-2 [&_.ql-tooltip_a]:hover:!underline
-  [&_.ql-picker]:!text-slate-700
-  [&_.ql-picker-label]:!text-slate-700 [&_.ql-picker-label]:hover:!text-slate-900
-  [&_.ql-picker-options]:!bg-white [&_.ql-picker-options]:!border [&_.ql-picker-options]:!border-slate-200 [&_.ql-picker-options]:!shadow-lg [&_.ql-picker-options]:!rounded-lg
-  [&_.ql-stroke]:!stroke-slate-600
-  [&_.ql-fill]:!fill-slate-600
-  [&_.ql-picker-item]:!text-slate-700
-  [&_.ql-active_.ql-stroke]:!stroke-blue-600
-  [&_.ql-active_.ql-fill]:!fill-blue-600
-">
-  <ReactQuill 
-    theme="snow" 
-    value={mensagem} 
-    onChange={setMensagem} 
-    modules={modulosEditor}
-    placeholder="Escreva o corpo do seu e-mail aqui..." 
-  />
-</div>
-
+                  [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
+                  [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
+                  [&_.ql-editor]:min-h-[350px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base
+                  [&_.ql-tooltip]:!absolute [&_.ql-tooltip]:!bg-white [&_.ql-tooltip]:!text-slate-900 [&_.ql-tooltip]:!border [&_.ql-tooltip]:!border-slate-200 [&_.ql-tooltip]:!shadow-xl [&_.ql-tooltip]:!rounded-xl [&_.ql-tooltip]:!p-4 [&_.ql-tooltip]:!z-50
+                  [&_.ql-tooltip_input]:!bg-white [&_.ql-tooltip_input]:!text-slate-900 [&_.ql-tooltip_input]:!border [&_.ql-tooltip_input]:!border-slate-300 [&_.ql-tooltip_input]:!rounded-md [&_.ql-tooltip_input]:!px-3 [&_.ql-tooltip_input]:!py-1.5 [&_.ql-tooltip_input]:!text-sm [&_.ql-tooltip_input]:focus:!outline-none [&_.ql-tooltip_input]:focus:!border-blue-500 [&_.ql-tooltip_input]:focus:!ring-1 [&_.ql-tooltip_input]:focus:!ring-blue-500
+                  [&_.ql-tooltip_a]:!text-blue-600 [&_.ql-tooltip_a]:!font-bold [&_.ql-tooltip_a]:!ml-2 [&_.ql-tooltip_a]:hover:!underline
+                  [&_.ql-picker]:!text-slate-700
+                  [&_.ql-picker-label]:!text-slate-700 [&_.ql-picker-label]:hover:!text-slate-900
+                  [&_.ql-picker-options]:!bg-white [&_.ql-picker-options]:!border [&_.ql-picker-options]:!border-slate-200 [&_.ql-picker-options]:!shadow-lg [&_.ql-picker-options]:!rounded-lg
+                  [&_.ql-stroke]:!stroke-slate-600
+                  [&_.ql-fill]:!fill-slate-600
+                  [&_.ql-picker-item]:!text-slate-700
+                  [&_.ql-active_.ql-stroke]:!stroke-blue-600
+                  [&_.ql-active_.ql-fill]:!fill-blue-600
+                ">
+                  <ReactQuill 
+                    theme="snow" 
+                    value={mensagem} 
+                    onChange={setMensagem} 
+                    modules={modulosEditor}
+                    placeholder="Escreva o corpo do seu e-mail aqui..." 
+                  />
+                </div>
               </div>
 
             </div>
@@ -431,7 +435,7 @@ export default function AutomacoesPage() {
               ) : (
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
-                  const st = stats[String(campanha.id)] || { abertos: 0, abertosReais: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
+                  const st = stats[String(campanha.id)] || { abertos: 0, reabertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
                   const corStatus = campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
                     : campanha.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700'
                     : campanha.status === 'Em Fila' ? 'bg-blue-100 text-blue-700'
@@ -474,14 +478,19 @@ export default function AutomacoesPage() {
                               <span className="flex items-center gap-1 text-blue-600" title="Enviados">
                                 <Send className="size-3" /> {st.enviados}
                               </span>
-                              <span className="flex items-center gap-1 text-emerald-600" title="Aberturas reais">
-                                <Eye className="size-3" /> {st.abertosReais}
+                              <span className="flex items-center gap-1 text-emerald-600" title="Abriram (abertura ou preview)">
+                                <Eye className="size-3" /> {st.abertos}
                                 {st.enviados > 0 && (
                                   <span className="text-[10px] opacity-70">
-                                    ({Math.round((st.abertosReais / st.enviados) * 100)}%)
+                                    ({Math.round((st.abertos / st.enviados) * 100)}%)
                                   </span>
                                 )}
                               </span>
+                              {st.reabertos > 0 && (
+                                <span className="flex items-center gap-1 text-orange-600" title="Leads quentes: abriram 2+ vezes">
+                                  <Flame className="size-3" /> {st.reabertos}
+                                </span>
+                              )}
                               <span className="flex items-center gap-1 text-purple-600" title="Cliques">
                                 <MousePointerClick className="size-3" /> {st.clicados}
                                 {st.enviados > 0 && (
