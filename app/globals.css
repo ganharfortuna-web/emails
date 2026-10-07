@@ -2,8 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ⚠️ IMPORTANTE: light, não dark!
+   O app tem fundo escuro próprio (bg-[#020817]).
+   Se usar "dark", o navegador escurece TODOS os componentes nativos
+   (inputs, dropdowns, calendário, scrollbar) e quebra o visual. */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -14,24 +18,24 @@ body {
 * {
   @apply box-border;
 }
+
 /* ============================================
-   Correção de inputs escuros (dark mode + autofill)
+   Correção de inputs escuros (autofill + nativos)
    ============================================ */
 
-/* Todos os inputs, selects e textareas */
 input,
 select,
 textarea {
-  color: #0f172a !important;              /* texto preto */
-  background-color: #ffffff !important;   /* fundo branco */
+  color: #0f172a !important;
+  background-color: #ffffff !important;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: #94a3b8 !important;              /* placeholder cinza claro */
+  color: #94a3b8 !important;
 }
 
-/* ⚠️ Isso é o mais importante: Chrome/Safari autofill */
+/* Chrome/Safari autofill — força fundo branco */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
@@ -42,22 +46,22 @@ textarea:-webkit-autofill:focus,
 select:-webkit-autofill,
 select:-webkit-autofill:hover,
 select:-webkit-autofill:focus {
-  -webkit-text-fill-color: #0f172a !important;      /* texto preto */
-  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;  /* fundo branco */
+  -webkit-text-fill-color: #0f172a !important;
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
   box-shadow: 0 0 0 1000px #ffffff inset !important;
   background-color: #ffffff !important;
   background-clip: content-box !important;
-  transition: background-color 9999s ease-in-out 0s !important; /* evita piscada amarela */
-  caret-color: #0f172a !important;         /* cursor preto */
+  transition: background-color 9999s ease-in-out 0s !important;
+  caret-color: #0f172a !important;
 }
 
-/* Select (dropdown) — corrige texto branco em algumas versões */
+/* Select (dropdown) */
 select option {
   color: #0f172a !important;
   background-color: #ffffff !important;
 }
 
-/* Focus: borda azul mantida */
+/* Focus: borda azul */
 input:focus,
 select:focus,
 textarea:focus {
@@ -66,7 +70,7 @@ textarea:focus {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
 }
 
-/* Datetime-local — o seletor de data/hora nativo */
+/* Datetime-local */
 input[type="datetime-local"],
 input[type="date"],
 input[type="time"] {
@@ -74,30 +78,9 @@ input[type="time"] {
   background-color: #ffffff !important;
 }
 
-/* Corrige o ícone do calendário em dark mode */
 input[type="datetime-local"]::-webkit-calendar-picker-indicator,
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="time"]::-webkit-calendar-picker-indicator {
   filter: invert(0) !important;
   cursor: pointer;
-}
-
-/* Modo dark do sistema — força cores claras nos campos de formulário */
-@media (prefers-color-scheme: dark) {
-  input,
-  select,
-  textarea {
-    color: #0f172a !important;
-    background-color: #ffffff !important;
-  }
-
-  input::placeholder,
-  textarea::placeholder {
-    color: #94a3b8 !important;
-  }
-
-  select option {
-    color: #0f172a !important;
-    background-color: #ffffff !important;
-  }
 }

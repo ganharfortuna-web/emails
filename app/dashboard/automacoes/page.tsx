@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Flame, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CheckCircle2 } from 'lucide-react'
+import { Send, Clock, Mail, LayoutTemplate, Loader2, Hourglass, Trash2, RotateCcw, CalendarClock, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Flame, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CheckCircle2, Target } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -28,13 +28,19 @@ const modulosEditor = {
 }
 
 type StatsItem = {
-  abertos: number
+  abertos: number         // aberturas REAIS (sem bots/MPP/prefetch)
+  abertosBrutos: number   // qualquer hit (real + prefetch + mpp)
   reabertos: number
   clicados: number
   total: number
   enviados: number
   pendentes: number
   falhados: number
+}
+
+const STATS_VAZIO: StatsItem = {
+  abertos: 0, abertosBrutos: 0, reabertos: 0, clicados: 0,
+  total: 0, enviados: 0, pendentes: 0, falhados: 0
 }
 
 export default function AutomacoesPage() {
@@ -97,14 +103,14 @@ export default function AutomacoesPage() {
   const carregarStats = async () => {
     const { data, error } = await supabase
       .from('email_queue')
-      .select('campaign_id, opened_at, clicked_at, status, open_count')
+      .select('campaign_id, opened_at, clicked_at, status, open_real_count, open_prefetch_count')
 
     if (error || !data) return
 
     const agrupado: Record<string, StatsItem> = {}
 
     for (const c of campanhas) {
-      agrupado[String(c.id)] = { abertos: 0, reabertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0, falhados: 0 }
+      agrupado[String(c.id)] = { ...STATS_VAZIO }
     }
 
     for (const item of data) {
@@ -114,10 +120,18 @@ export default function AutomacoesPage() {
       if (item.status === 'sent') agrupado[key].enviados++
       if (item.status === 'pending') agrupado[key].pendentes++
       if (item.status === 'failed') agrupado[key].falhados++
-      if (item.opened_at) {
+
+      // ✅ Abertura REAL (passou pelos filtros de bot/MPP/prefetch)
+      if ((item.open_real_count || 0) > 0) {
         agrupado[key].abertos++
-        if ((item.open_count || 1) > 1) agrupado[key].reabertos++
+        if (item.open_real_count > 1) agrupado[key].reabertos++
       }
+
+      // 📊 Qualquer hit (inclui prefetch, MPP, mas NÃO conta como aberto real)
+      if ((item.open_real_count || 0) > 0 || (item.open_prefetch_count || 0) > 0) {
+        agrupado[key].abertosBrutos++
+      }
+
       if (item.clicked_at) agrupado[key].clicados++
     }
     setStats(agrupado)
@@ -182,18 +196,17 @@ export default function AutomacoesPage() {
     setMsgSucesso('')
 
     try {
-      // 1. Busca emails da campanha conforme o tipo
       let query = supabase
         .from('email_queue')
-        .select('recipient_email, recipient_name')
+        .select('recipient_email, recipient_name, open_real_count, opened_at, clicked_at')
         .eq('campaign_id', modalDetalhes.id)
 
       if (tipoSegmento === 'abridores') {
-        query = query.not('opened_at', 'is', null)
+        query = query.gt('open_real_count', 0)
       } else if (tipoSegmento === 'clicadores') {
         query = query.not('clicked_at', 'is', null)
       } else if (tipoSegmento === 'nao_abriram') {
-        query = query.is('opened_at', null).eq('status', 'sent')
+        query = query.eq('status', 'sent').or('open_real_count.is.null,open_real_count.eq.0')
       }
 
       const { data: itens, error } = await query
@@ -204,7 +217,6 @@ export default function AutomacoesPage() {
         return
       }
 
-      // 2. Cria a nova lista
       const { data: novaLista, error: errLista } = await supabase
         .from('listas')
         .insert([{ nome: nomeNovaLista.trim() }])
@@ -216,7 +228,6 @@ export default function AutomacoesPage() {
         return
       }
 
-      // 3. Insere os contatos na nova lista (deduplicando por email)
       const vistos = new Set<string>()
       const novosContatos = itens
         .filter(i => {
@@ -254,7 +265,7 @@ export default function AutomacoesPage() {
   const abrirModalReenvio = async (campanha: any) => {
     const { data } = await supabase
       .from('email_queue')
-      .select('id, opened_at')
+      .select('id, open_real_count')
       .eq('campaign_id', campanha.id)
       .eq('status', 'sent')
 
@@ -263,9 +274,10 @@ export default function AutomacoesPage() {
       return
     }
 
-    const naoAbriram = data.filter(d => !d.opened_at).length
+    // Considera não abriu quem não tem abertura REAL
+    const naoAbriram = data.filter(d => !d.open_real_count || d.open_real_count === 0).length
     if (naoAbriram === 0) {
-      alert('🎉 Todos já abriram! Nada para reenviar.')
+      alert('🎉 Todos já abriram de verdade! Nada para reenviar.')
       return
     }
 
@@ -278,11 +290,11 @@ export default function AutomacoesPage() {
 
     const { data: originais } = await supabase
       .from('email_queue')
-      .select('recipient_email, recipient_name, subject, body, opened_at')
+      .select('recipient_email, recipient_name, subject, body, open_real_count')
       .eq('campaign_id', modalReenvio.id)
       .eq('status', 'sent')
 
-    const naoAbriram = (originais || []).filter(o => !o.opened_at)
+    const naoAbriram = (originais || []).filter(o => !o.open_real_count || o.open_real_count === 0)
 
     if (naoAbriram.length === 0) {
       alert('🎉 Todos já abriram!')
@@ -532,13 +544,14 @@ export default function AutomacoesPage() {
               ) : (
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
-                  const st = stats[String(campanha.id)] || { abertos: 0, reabertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0, falhados: 0 }
+                  const st = stats[String(campanha.id)] || { ...STATS_VAZIO }
                   const corStatus = campanha.status === 'Pausada' ? 'bg-slate-200 text-slate-700'
                     : campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
                     : campanha.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700'
                     : campanha.status === 'Em Fila' ? 'bg-blue-100 text-blue-700'
                     : campanha.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700'
                     : 'bg-amber-100 text-amber-700'
+                  const ctor = st.abertos > 0 ? Math.round((st.clicados / st.abertos) * 100) : 0
                   return (
                     <div key={campanha.id}
                       className={`p-4 rounded-xl border ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'} transition-colors`}>
@@ -564,26 +577,40 @@ export default function AutomacoesPage() {
                           </p>
 
                           {st.total > 0 && (
-                            <div className="mt-2 flex items-center gap-3 text-xs font-bold flex-wrap">
-                              <span className="flex items-center gap-1 text-blue-600" title="Enviados">
-                                <Send className="size-3" /> {st.enviados}/{st.total}
-                              </span>
-                              <span className="flex items-center gap-1 text-emerald-600" title="Abriram">
-                                <Eye className="size-3" /> {st.abertos}
-                                {st.enviados > 0 && (
-                                  <span className="text-[10px] opacity-70">
-                                    ({Math.round((st.abertos / st.enviados) * 100)}%)
+                            <div className="mt-2 space-y-1.5">
+                              <div className="flex items-center gap-3 text-xs font-bold flex-wrap">
+                                <span className="flex items-center gap-1 text-blue-600" title="Enviados">
+                                  <Send className="size-3" /> {st.enviados}/{st.total}
+                                </span>
+                                <span className="flex items-center gap-1 text-emerald-600" title="Abriram de verdade (sem MPP/bot/prefetch)">
+                                  <Eye className="size-3" /> {st.abertos}
+                                  {st.enviados > 0 && (
+                                    <span className="text-[10px] opacity-70">
+                                      ({Math.round((st.abertos / st.enviados) * 100)}%)
+                                    </span>
+                                  )}
+                                </span>
+                                {st.reabertos > 0 && (
+                                  <span className="flex items-center gap-1 text-orange-600" title="Leads quentes (2+ aberturas reais)">
+                                    <Flame className="size-3" /> {st.reabertos}
                                   </span>
                                 )}
-                              </span>
-                              {st.reabertos > 0 && (
-                                <span className="flex items-center gap-1 text-orange-600" title="Reabertos">
-                                  <Flame className="size-3" /> {st.reabertos}
+                                <span className="flex items-center gap-1 text-purple-600" title="Cliques">
+                                  <MousePointerClick className="size-3" /> {st.clicados}
                                 </span>
+                              </div>
+
+                              {st.abertos > 0 && st.clicados > 0 && (
+                                <div className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                                  <Target className="size-3" /> CTOR {ctor}%
+                                </div>
                               )}
-                              <span className="flex items-center gap-1 text-purple-600" title="Cliques">
-                                <MousePointerClick className="size-3" /> {st.clicados}
-                              </span>
+
+                              {st.abertosBrutos > st.abertos && (
+                                <p className="text-[10px] text-slate-400 font-medium">
+                                  {st.abertosBrutos - st.abertos} hit(s) ignorado(s) (prefetch/MPP/bot)
+                                </p>
+                              )}
                             </div>
                           )}
 
@@ -638,10 +665,10 @@ export default function AutomacoesPage() {
               <LayoutTemplate className="size-4" /> Como funciona
             </h3>
             <ul className="text-sm text-emerald-700 space-y-2 font-medium">
-              <li>• Envio em lotes automáticos via cron externo</li>
+              <li>• Aberturas filtram Apple MPP, bots e prefetch</li>
+              <li>• CTOR = cliques ÷ aberturas reais</li>
               <li>• Pause e retome campanhas a qualquer momento</li>
               <li>• Crie segmentos a partir de aberturas/cliques</li>
-              <li>• Status atualiza sozinho a cada 30s</li>
             </ul>
           </div>
         </div>
@@ -649,8 +676,11 @@ export default function AutomacoesPage() {
 
       {/* ============== MODAL DE DETALHES DA CAMPANHA ============== */}
       {modalDetalhes && (() => {
-        const st = stats[String(modalDetalhes.id)] || { abertos: 0, reabertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0, falhados: 0 }
+        const st = stats[String(modalDetalhes.id)] || { ...STATS_VAZIO }
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
+        const ctor = st.abertos > 0 ? Math.round((st.clicados / st.abertos) * 100) : 0
+        const taxaAbertura = st.enviados > 0 ? Math.round((st.abertos / st.enviados) * 100) : 0
+        const taxaClique = st.enviados > 0 ? Math.round((st.clicados / st.enviados) * 100) : 0
 
         return (
           <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -672,7 +702,7 @@ export default function AutomacoesPage() {
               {/* Corpo */}
               <div className="p-6 space-y-6">
 
-                {/* Status + Progresso */}
+                {/* Progresso */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Progresso do envio</span>
@@ -692,7 +722,7 @@ export default function AutomacoesPage() {
                   </div>
                 </div>
 
-                {/* Cards de métricas */}
+                {/* Cards principais */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
                     <Send className="size-5 text-blue-600 mx-auto mb-1" />
@@ -704,7 +734,7 @@ export default function AutomacoesPage() {
                     <p className="text-2xl font-black text-slate-900">{st.abertos}</p>
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
                       Abriram
-                      {st.enviados > 0 && <span className="block text-emerald-700">{Math.round((st.abertos / st.enviados) * 100)}%</span>}
+                      <span className="block text-emerald-700">{taxaAbertura}%</span>
                     </p>
                   </div>
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-center">
@@ -712,7 +742,7 @@ export default function AutomacoesPage() {
                     <p className="text-2xl font-black text-slate-900">{st.clicados}</p>
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
                       Clicaram
-                      {st.enviados > 0 && <span className="block text-purple-700">{Math.round((st.clicados / st.enviados) * 100)}%</span>}
+                      <span className="block text-purple-700">{taxaClique}%</span>
                     </p>
                   </div>
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
@@ -722,11 +752,39 @@ export default function AutomacoesPage() {
                   </div>
                 </div>
 
+                {/* CTOR — Card destaque */}
+                {st.abertos > 0 && (
+                  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Target className="size-5 text-indigo-600" />
+                        <span className="text-sm font-black text-indigo-900">CTOR — Click-to-Open Rate</span>
+                      </div>
+                      <span className="text-2xl font-black text-indigo-700">{ctor}%</span>
+                    </div>
+                    <p className="text-xs text-indigo-700 font-medium">
+                      De <strong>{st.abertos}</strong> pessoas que abriram de verdade, <strong>{st.clicados}</strong> clicaram.
+                      {ctor >= 20 && <span className="block mt-1 text-emerald-700 font-bold">🎉 Acima da média (bom engajamento)!</span>}
+                      {ctor > 0 && ctor < 10 && <span className="block mt-1 text-amber-700 font-bold">⚠️ Abaixo do ideal — revise o CTA do e-mail.</span>}
+                    </p>
+                  </div>
+                )}
+
                 {st.reabertos > 0 && (
                   <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-2">
                     <Flame className="size-5 text-orange-600" />
                     <p className="text-sm font-bold text-orange-900">
                       {st.reabertos} lead(s) abriram 2+ vezes — <span className="text-orange-700">leads quentes!</span>
+                    </p>
+                  </div>
+                )}
+
+                {st.abertosBrutos > st.abertos && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2">
+                    <AlertCircle className="size-4 text-slate-500 shrink-0" />
+                    <p className="text-xs text-slate-600 font-medium">
+                      <strong>{st.abertosBrutos - st.abertos}</strong> hit(s) ignorado(s) por filtros (Apple MPP, prefetch ou bots).
+                      Total bruto: <strong>{st.abertosBrutos}</strong>.
                     </p>
                   </div>
                 )}
@@ -740,7 +798,7 @@ export default function AutomacoesPage() {
                   </div>
                 )}
 
-                {/* Ações */}
+                {/* Criar segmento */}
                 <div className="border-t border-slate-100 pt-6">
                   <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
                     <Users className="size-4 text-indigo-600" /> Criar segmento
@@ -751,7 +809,7 @@ export default function AutomacoesPage() {
                       onClick={() => setTipoSegmento('abridores')}
                       className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300'}`}>
                       <Eye className={`size-4 mb-1 ${tipoSegmento === 'abridores' ? 'text-emerald-600' : 'text-slate-400'}`} />
-                      <p className="text-xs font-bold text-slate-800">Abridores</p>
+                      <p className="text-xs font-bold text-slate-800">Abridores reais</p>
                       <p className="text-[10px] text-slate-500">{st.abertos} contatos</p>
                     </button>
 
@@ -777,7 +835,7 @@ export default function AutomacoesPage() {
                       type="text"
                       value={nomeNovaLista}
                       onChange={e => setNomeNovaLista(e.target.value)}
-                      placeholder={`Nome da nova lista (ex: ${tipoSegmento === 'abridores' ? 'Abridores' : tipoSegmento === 'clicadores' ? 'Clicadores' : 'Nao Abriram'} - ${modalDetalhes.assunto.slice(0, 20)}...)`}
+                      placeholder={`Nome da nova lista...`}
                       className="flex-1 p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 text-sm"
                     />
                     <button
@@ -797,7 +855,7 @@ export default function AutomacoesPage() {
                   )}
                 </div>
 
-                {/* Outras ações */}
+                {/* Ações */}
                 <div className="border-t border-slate-100 pt-4 flex flex-wrap gap-2">
                   {modalDetalhes.status === 'Pausada' ? (
                     <button
@@ -834,7 +892,7 @@ export default function AutomacoesPage() {
                 <RotateCcw className="size-5" /> Reenviar para quem não abriu
               </h2>
               <p className="text-amber-700 text-sm mt-1">
-                <strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram.
+                <strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram de verdade.
               </p>
             </div>
 
