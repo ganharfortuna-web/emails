@@ -5,7 +5,7 @@ import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 
 export const dynamic = 'force-dynamic'
 
-const BATCH_SIZE = 10
+const BATCH_SIZE = 8
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -36,12 +36,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // 2. Busca IDs das campanhas PAUSADAS
+    // 2. Campanhas pausadas
     const { data: pausadas } = await supabase
       .from('campanhas').select('id').eq('status', 'Pausada')
     const idsPausados = (pausadas || []).map((c: any) => c.id)
 
-    // 3. Busca e-mails suprimidos (nunca enviar)
+    // 3. Emails suprimidos
     const { data: suprimidos } = await supabase
       .from('suppression_list').select('email')
     const emailsSuprimidos = new Set(
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // 5. Busca próximo lote (respeitando next_retry_at)
+    // 5. Próximo lote (respeitando next_retry_at)
     const agora = new Date().toISOString()
     let query = supabase
       .from('email_queue')
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: filaError.message }, { status: 500 })
     }
 
-    // 6. Filtra pausadas, suprimidas e limita ao BATCH_SIZE
+    // 6. Filtra pausadas + suprimidas
     const fila = (filaRaw || [])
       .filter(item => !idsPausados.includes(item.campaign_id))
       .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
@@ -108,8 +108,14 @@ export async function POST(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // Reescreve links + pixel + footer
-      let htmlFinal = item.body || ''
+      // ===== PERSONALIZAÇÃO POR DESTINATÁRIO =====
+      let corpoPersonalizado = item.body || ''
+      corpoPersonalizado = corpoPersonalizado
+        .replace(/\{\{email\}\}/gi, item.recipient_email || '')
+        .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+
+      // ===== REESCREVE LINKS + PIXEL + FOOTER =====
+      let htmlFinal = corpoPersonalizado
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
           /href="(https?:\/\/[^"]+)"/g,
@@ -118,12 +124,15 @@ export async function POST(request: Request) {
         )
 
         const pixel = `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
-
         const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email)}`
+
         const footer = `
 <hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" />
+<p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">
+  Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong>
+</p>
 <p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">
-  Você está recebendo este e-mail porque se cadastrou em nossa lista.<br/>
+  Você está recebendo porque se cadastrou em nossa lista.<br/>
   Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.
 </p>`
 
@@ -152,14 +161,12 @@ export async function POST(request: Request) {
         enviados++
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
-        // ===== CLASSIFICA O ERRO =====
         const classificacao = classificarErro(err.message, err.response)
         const retryCount = (item.retry_count || 0) + 1
         const podeRetentar = classificacao.retryable && retryCount < 3
 
         console.error(`Bounce ${classificacao.type} para ${item.recipient_email}:`, err.message)
 
-        // Log do bounce
         await supabase.from('bounce_log').insert([{
           email_queue_id: item.id,
           campaign_id: item.campaign_id,
@@ -192,7 +199,6 @@ export async function POST(request: Request) {
             })
             .eq('id', item.id)
 
-          // Hard bounce ou complaint → bane o contato
           if (classificacao.action === 'block_contact') {
             await supabase
               .from('contatos')
@@ -212,7 +218,6 @@ export async function POST(request: Request) {
               }], { onConflict: 'email' })
           }
 
-          // Soft bounce esgotado → incrementa contador no contato
           if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
             const { data: contato } = await supabase
               .from('contatos')
@@ -229,7 +234,6 @@ export async function POST(request: Request) {
               .eq('email', (item.recipient_email || '').toLowerCase())
           }
 
-          // Auth error → desativa conta SMTP
           if (classificacao.action === 'disable_account') {
             await supabase
               .from('smtp_accounts')

@@ -40,7 +40,7 @@ export async function GET(request: Request) {
       .eq('status', 'Agendada')
       .lte('scheduled_at', new Date().toISOString())
 
-    // 2. IDs de campanhas pausadas
+    // 2. Campanhas pausadas
     const { data: pausadas } = await supabase
       .from('campanhas').select('id').eq('status', 'Pausada')
     const idsPausados = (pausadas || []).map((c: any) => c.id)
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
       .eq('status', 'pending')
       .or(`next_retry_at.is.null,next_retry_at.lte.${agora}`)
       .order('created_at', { ascending: true })
-      .limit(60)
+      .limit(30)
 
     if (filaError || !filaRaw || filaRaw.length === 0) {
       return NextResponse.json({ message: 'Nada pendente.' })
@@ -102,7 +102,14 @@ export async function GET(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      let htmlFinal = item.body || ''
+      // ===== PERSONALIZAÇÃO POR DESTINATÁRIO =====
+      let corpoPersonalizado = item.body || ''
+      corpoPersonalizado = corpoPersonalizado
+        .replace(/\{\{email\}\}/gi, item.recipient_email || '')
+        .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+
+      // ===== REESCREVE LINKS + PIXEL + FOOTER =====
+      let htmlFinal = corpoPersonalizado
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
           /href="(https?:\/\/[^"]+)"/g,
@@ -111,12 +118,15 @@ export async function GET(request: Request) {
         )
 
         const pixel = `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
-
         const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email)}`
+
         const footer = `
 <hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" />
+<p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">
+  Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong>
+</p>
 <p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">
-  Você está recebendo este e-mail porque se cadastrou em nossa lista.<br/>
+  Você está recebendo porque se cadastrou em nossa lista.<br/>
   Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.
 </p>`
 
