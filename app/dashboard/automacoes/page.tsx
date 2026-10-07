@@ -43,7 +43,7 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
 
-  const [stats, setStats] = useState<Record<string, { abertos: number; clicados: number; total: number; enviados: number; pendentes: number }>>({})
+  const [stats, setStats] = useState<Record<string, { abertos: number; abertosReais: number; clicados: number; total: number; enviados: number; pendentes: number }>>({})
 
   useEffect(() => {
     buscarListas()
@@ -81,14 +81,14 @@ export default function AutomacoesPage() {
   const carregarStats = async () => {
     const { data, error } = await supabase
       .from('email_queue')
-      .select('campaign_id, opened_at, clicked_at, status')
+      .select('campaign_id, opened_at, clicked_at, status, open_is_preview')
 
     if (error || !data) return
 
-    const agrupado: Record<string, { abertos: number; clicados: number; total: number; enviados: number; pendentes: number }> = {}
+    const agrupado: Record<string, { abertos: number; abertosReais: number; clicados: number; total: number; enviados: number; pendentes: number }> = {}
 
     for (const c of campanhas) {
-      agrupado[String(c.id)] = { abertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
+      agrupado[String(c.id)] = { abertos: 0, abertosReais: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
     }
 
     for (const item of data) {
@@ -97,7 +97,11 @@ export default function AutomacoesPage() {
       agrupado[key].total++
       if (item.status === 'sent') agrupado[key].enviados++
       if (item.status === 'pending') agrupado[key].pendentes++
-      if (item.opened_at) agrupado[key].abertos++
+      if (item.opened_at) {
+        agrupado[key].abertos++
+        // Só conta como "real" se NÃO for preview
+        if (!item.open_is_preview) agrupado[key].abertosReais++
+      }
       if (item.clicked_at) agrupado[key].clicados++
     }
     setStats(agrupado)
@@ -146,7 +150,7 @@ export default function AutomacoesPage() {
   const abrirModalReenvio = async (campanha: any) => {
     const { data } = await supabase
       .from('email_queue')
-      .select('id, opened_at')
+      .select('id, opened_at, open_is_preview')
       .eq('campaign_id', campanha.id)
       .eq('status', 'sent')
 
@@ -155,7 +159,8 @@ export default function AutomacoesPage() {
       return
     }
 
-    const naoAbriram = data.filter(d => !d.opened_at).length
+    // Considera "não abriu" somente quem NÃO tem abertura real
+    const naoAbriram = data.filter(d => !d.opened_at || d.open_is_preview).length
     if (naoAbriram === 0) {
       alert('🎉 Todos já abriram! Nada para reenviar.')
       return
@@ -170,12 +175,14 @@ export default function AutomacoesPage() {
 
     const { data: originais } = await supabase
       .from('email_queue')
-      .select('recipient_email, recipient_name, subject, body')
+      .select('recipient_email, recipient_name, subject, body, opened_at, open_is_preview')
       .eq('campaign_id', modalReenvio.id)
       .eq('status', 'sent')
-      .is('opened_at', null)
 
-    if (!originais || originais.length === 0) {
+    // Filtra no client: quem não abriu OU só teve preview
+    const naoAbriram = (originais || []).filter(o => !o.opened_at || o.open_is_preview)
+
+    if (naoAbriram.length === 0) {
       alert('🎉 Todos já abriram!')
       setModalReenvio(null)
       return
@@ -186,14 +193,14 @@ export default function AutomacoesPage() {
       .insert([{
         lista_id: modalReenvio.lista_id,
         assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`,
-        mensagem: originais[0].body,
+        mensagem: naoAbriram[0].body,
         status: 'Em Fila',
       }])
       .select().single()
 
     if (error || !nova) { alert('Erro ao criar campanha de reenvio.'); return }
 
-    const fila = originais.map(o => ({
+    const fila = naoAbriram.map(o => ({
       campaign_id: nova.id,
       recipient_email: o.recipient_email,
       recipient_name: o.recipient_name,
@@ -406,7 +413,7 @@ export default function AutomacoesPage() {
               ) : (
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
-                  const st = stats[String(campanha.id)] || { abertos: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
+                  const st = stats[String(campanha.id)] || { abertos: 0, abertosReais: 0, clicados: 0, total: 0, enviados: 0, pendentes: 0 }
                   const corStatus = campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
                     : campanha.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700'
                     : campanha.status === 'Em Fila' ? 'bg-blue-100 text-blue-700'
@@ -443,17 +450,17 @@ export default function AutomacoesPage() {
 
                           {st.total > 0 && (
                             <div className="mt-2 flex items-center gap-3 text-xs font-bold flex-wrap">
-                              <span className="flex items-center gap-1 text-slate-600" title="Total">
+                              <span className="flex items-center gap-1 text-slate-600" title="Total de contatos">
                                 <Mail className="size-3" /> {st.total}
                               </span>
                               <span className="flex items-center gap-1 text-blue-600" title="Enviados">
                                 <Send className="size-3" /> {st.enviados}
                               </span>
-                              <span className="flex items-center gap-1 text-emerald-600" title="Abertos">
-                                <Eye className="size-3" /> {st.abertos}
+                              <span className="flex items-center gap-1 text-emerald-600" title="Aberturas reais">
+                                <Eye className="size-3" /> {st.abertosReais}
                                 {st.enviados > 0 && (
                                   <span className="text-[10px] opacity-70">
-                                    ({Math.round((st.abertos / st.enviados) * 100)}%)
+                                    ({Math.round((st.abertosReais / st.enviados) * 100)}%)
                                   </span>
                                 )}
                               </span>

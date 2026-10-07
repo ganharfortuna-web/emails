@@ -2,15 +2,14 @@ import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
-// Pixel GIF transparente 1x1
 const PIXEL = Buffer.from(
   'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
   'base64'
 )
 
-// ⏱️ Só conta abertura se passaram X segundos desde o envio
-// Isso evita contabilizar o "preview" automático do Gmail/Outlook
-const DELAY_MINIMO_SEGUNDOS = 90
+// Marca abertura como "real" só se passou X segundos
+// Abaixo disso, considera como preview automático do cliente
+const DELAY_PREVIEW_SEGUNDOS = 60
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -23,7 +22,7 @@ export async function GET(request: Request) {
     if (supabaseUrl && supabaseKey) {
       const supabase = createClient(supabaseUrl, supabaseKey)
 
-      // Busca o item para ver quando foi enviado
+      // Busca o item
       const { data: item } = await supabase
         .from('email_queue')
         .select('id, sent_at, opened_at, status')
@@ -35,14 +34,19 @@ export async function GET(request: Request) {
         const enviadoEm = new Date(item.sent_at).getTime()
         const segundosDesdeEnvio = (agora - enviadoEm) / 1000
 
-        // Só marca se passou tempo suficiente (filtra preview automático)
-        if (segundosDesdeEnvio >= DELAY_MINIMO_SEGUNDOS) {
-          await supabase
-            .from('email_queue')
-            .update({ opened_at: new Date().toISOString() })
-            .eq('id', id)
-            .is('opened_at', null)
-        }
+        const isPreview = segundosDesdeEnvio < DELAY_PREVIEW_SEGUNDOS
+
+        // ✅ MARCA SEMPRE (mesmo se for preview)
+        // Se for preview, marca open_is_preview = true
+        // Se for real, marca open_is_preview = false
+        await supabase
+          .from('email_queue')
+          .update({ 
+            opened_at: new Date().toISOString(),
+            open_is_preview: isPreview
+          })
+          .eq('id', id)
+          .is('opened_at', null)
       }
     }
   }
