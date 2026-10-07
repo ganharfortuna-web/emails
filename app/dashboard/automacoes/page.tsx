@@ -357,12 +357,30 @@ export default function AutomacoesPage() {
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Mensagem *</label>
                 <div className="bg-white rounded-xl border border-slate-200 overflow-visible
-                  [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
-                  [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
-                  [&_.ql-editor]:min-h-[350px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base">
-                  <ReactQuill theme="snow" value={mensagem} onChange={setMensagem} modules={modulosEditor}
-                    placeholder="Escreva o corpo do seu e-mail aqui..." />
-                </div>
+  [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-slate-200 [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
+  [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
+  [&_.ql-editor]:min-h-[350px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base
+  [&_.ql-tooltip]:!absolute [&_.ql-tooltip]:!bg-white [&_.ql-tooltip]:!text-slate-900 [&_.ql-tooltip]:!border [&_.ql-tooltip]:!border-slate-200 [&_.ql-tooltip]:!shadow-xl [&_.ql-tooltip]:!rounded-xl [&_.ql-tooltip]:!p-4 [&_.ql-tooltip]:!z-50
+  [&_.ql-tooltip_input]:!bg-white [&_.ql-tooltip_input]:!text-slate-900 [&_.ql-tooltip_input]:!border [&_.ql-tooltip_input]:!border-slate-300 [&_.ql-tooltip_input]:!rounded-md [&_.ql-tooltip_input]:!px-3 [&_.ql-tooltip_input]:!py-1.5 [&_.ql-tooltip_input]:!text-sm [&_.ql-tooltip_input]:focus:!outline-none [&_.ql-tooltip_input]:focus:!border-blue-500 [&_.ql-tooltip_input]:focus:!ring-1 [&_.ql-tooltip_input]:focus:!ring-blue-500
+  [&_.ql-tooltip_a]:!text-blue-600 [&_.ql-tooltip_a]:!font-bold [&_.ql-tooltip_a]:!ml-2 [&_.ql-tooltip_a]:hover:!underline
+  [&_.ql-picker]:!text-slate-700
+  [&_.ql-picker-label]:!text-slate-700 [&_.ql-picker-label]:hover:!text-slate-900
+  [&_.ql-picker-options]:!bg-white [&_.ql-picker-options]:!border [&_.ql-picker-options]:!border-slate-200 [&_.ql-picker-options]:!shadow-lg [&_.ql-picker-options]:!rounded-lg
+  [&_.ql-stroke]:!stroke-slate-600
+  [&_.ql-fill]:!fill-slate-600
+  [&_.ql-picker-item]:!text-slate-700
+  [&_.ql-active_.ql-stroke]:!stroke-blue-600
+  [&_.ql-active_.ql-fill]:!fill-blue-600
+">
+  <ReactQuill 
+    theme="snow" 
+    value={mensagem} 
+    onChange={setMensagem} 
+    modules={modulosEditor}
+    placeholder="Escreva o corpo do seu e-mail aqui..." 
+  />
+</div>
+
               </div>
 
             </div>
