@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
+import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,15 +40,19 @@ export async function GET(request: Request) {
       .eq('status', 'Agendada')
       .lte('scheduled_at', new Date().toISOString())
 
-    // 2. Busca IDs das campanhas PAUSADAS (para ignorar)
+    // 2. IDs de campanhas pausadas
     const { data: pausadas } = await supabase
-      .from('campanhas')
-      .select('id')
-      .eq('status', 'Pausada')
-
+      .from('campanhas').select('id').eq('status', 'Pausada')
     const idsPausados = (pausadas || []).map((c: any) => c.id)
 
-    // 3. Contas ativas ordenadas pela menos usada
+    // 3. Emails suprimidos
+    const { data: suprimidos } = await supabase
+      .from('suppression_list').select('email')
+    const emailsSuprimidos = new Set(
+      (suprimidos || []).map(s => (s.email || '').toLowerCase())
+    )
+
+    // 4. Contas ativas
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -59,11 +64,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Sem contas disponíveis.' })
     }
 
-    // 4. Lote de 30 pendentes (busca 60 para poder filtrar pausados)
+    // 5. Lote (respeitando next_retry_at)
+    const agora = new Date().toISOString()
     const { data: filaRaw, error: filaError } = await supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
+      .or(`next_retry_at.is.null,next_retry_at.lte.${agora}`)
       .order('created_at', { ascending: true })
       .limit(60)
 
@@ -71,13 +78,14 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Nada pendente.' })
     }
 
-    // 5. Filtra campanhas pausadas e limita a 30
+    // 6. Filtra pausadas + suprimidas
     const fila = filaRaw
       .filter(item => !idsPausados.includes(item.campaign_id))
+      .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
       .slice(0, 30)
 
     if (fila.length === 0) {
-      return NextResponse.json({ message: 'Todas as pendentes pertencem a campanhas pausadas.' })
+      return NextResponse.json({ message: 'Sem e-mails elegíveis.' })
     }
 
     let enviados = 0
@@ -94,7 +102,6 @@ export async function GET(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // Reescreve links + injeta pixel + footer de descadastro
       let htmlFinal = item.body || ''
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
@@ -126,7 +133,7 @@ export async function GET(request: Request) {
 
         await supabase
           .from('email_queue')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0 })
           .eq('id', item.id)
 
         await supabase
@@ -138,15 +145,91 @@ export async function GET(request: Request) {
         enviados++
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
-        console.error('Erro envio:', item.recipient_email, err.message)
-        await supabase
-          .from('email_queue')
-          .update({ status: 'failed', error_log: err.message })
-          .eq('id', item.id)
+        const classificacao = classificarErro(err.message, err.response)
+        const retryCount = (item.retry_count || 0) + 1
+        const podeRetentar = classificacao.retryable && retryCount < 3
+
+        console.error(`[cron] Bounce ${classificacao.type} para ${item.recipient_email}:`, err.message)
+
+        await supabase.from('bounce_log').insert([{
+          email_queue_id: item.id,
+          campaign_id: item.campaign_id,
+          recipient_email: item.recipient_email,
+          bounce_type: classificacao.type,
+          error_code: classificacao.code,
+          error_message: err.message?.slice(0, 500),
+          smtp_account_id: contaAtual.id,
+        }])
+
+        if (podeRetentar) {
+          await supabase
+            .from('email_queue')
+            .update({
+              status: 'pending',
+              error_log: err.message?.slice(0, 500),
+              bounce_type: classificacao.type,
+              retry_count: retryCount,
+              next_retry_at: calcularProximaTentativa(retryCount).toISOString(),
+            })
+            .eq('id', item.id)
+        } else {
+          await supabase
+            .from('email_queue')
+            .update({
+              status: 'failed',
+              error_log: err.message?.slice(0, 500),
+              bounce_type: classificacao.type,
+              retry_count: retryCount,
+            })
+            .eq('id', item.id)
+
+          if (classificacao.action === 'block_contact') {
+            await supabase
+              .from('contatos')
+              .update({
+                status: 'bounced',
+                last_bounce_at: new Date().toISOString(),
+                last_bounce_reason: err.message?.slice(0, 300),
+              })
+              .eq('email', (item.recipient_email || '').toLowerCase())
+
+            await supabase
+              .from('suppression_list')
+              .upsert([{
+                email: (item.recipient_email || '').toLowerCase(),
+                reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce',
+                original_error: err.message?.slice(0, 300),
+              }], { onConflict: 'email' })
+          }
+
+          if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
+            const { data: contato } = await supabase
+              .from('contatos')
+              .select('bounce_count')
+              .eq('email', (item.recipient_email || '').toLowerCase())
+              .single()
+
+            await supabase
+              .from('contatos')
+              .update({
+                bounce_count: (contato?.bounce_count || 0) + 1,
+                last_bounce_at: new Date().toISOString(),
+              })
+              .eq('email', (item.recipient_email || '').toLowerCase())
+          }
+
+          if (classificacao.action === 'disable_account') {
+            await supabase
+              .from('smtp_accounts')
+              .update({ is_active: false })
+              .eq('id', contaAtual.id)
+            console.error(`🚫 Conta ${contaAtual.email} desativada (auth error)`)
+          }
+        }
       }
     }
 
-    // 6. Atualiza status das campanhas (só se não estiver pausada)
+    // 7. Atualiza status das campanhas
     for (const cid of campaignIds) {
       if (idsPausados.includes(cid)) continue
 
@@ -162,7 +245,13 @@ export async function GET(request: Request) {
         .eq('id', cid)
     }
 
-    return NextResponse.json({ success: true, processed: fila.length, enviados, pausadas: idsPausados.length })
+    return NextResponse.json({
+      success: true,
+      processed: fila.length,
+      enviados,
+      pausadas: idsPausados.length,
+      suprimidos: emailsSuprimidos.size,
+    })
   } catch (error: any) {
     console.error('ERRO cron:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

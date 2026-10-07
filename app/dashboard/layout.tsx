@@ -14,7 +14,8 @@ import {
   Menu, 
   X,
   Loader2,
-  FileText
+  FileText,
+  ShieldAlert
 } from 'lucide-react'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -61,13 +62,13 @@ export default function DashboardLayout({
     router.push('/login')
   }
 
-  // Links do Menu Lateral com a opção "Configurações" vinculada à rota /dashboard/configuracoes
   const linksMenu = [
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
     { nome: 'Listas', rota: '/dashboard/listas', icone: Mail },
     { nome: 'Automações', rota: '/dashboard/automacoes', icone: GitMerge },
     { nome: 'Páginas', rota: '/dashboard/paginas', icone: FileText },
+    { nome: 'Bounces', rota: '/dashboard/bounces', icone: ShieldAlert },
     { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings },
   ]
 

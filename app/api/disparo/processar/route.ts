@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
+import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,25 +31,24 @@ export async function POST(request: Request) {
 
       if (camp?.status === 'Pausada') {
         return NextResponse.json({
-          success: true,
-          processed: 0,
-          enviados: 0,
-          restantes: 0,
-          done: false,
-          pausada: true,
+          success: true, processed: 0, enviados: 0, restantes: 0, done: false, pausada: true,
         })
       }
     }
 
-    // 2. Busca IDs das campanhas PAUSADAS (para ignorar)
+    // 2. Busca IDs das campanhas PAUSADAS
     const { data: pausadas } = await supabase
-      .from('campanhas')
-      .select('id')
-      .eq('status', 'Pausada')
-
+      .from('campanhas').select('id').eq('status', 'Pausada')
     const idsPausados = (pausadas || []).map((c: any) => c.id)
 
-    // 3. Contas ativas ordenadas pela menos usada
+    // 3. Busca e-mails suprimidos (nunca enviar)
+    const { data: suprimidos } = await supabase
+      .from('suppression_list').select('email')
+    const emailsSuprimidos = new Set(
+      (suprimidos || []).map(s => (s.email || '').toLowerCase())
+    )
+
+    // 4. Contas ativas ordenadas pela menos usada
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -63,11 +63,13 @@ export async function POST(request: Request) {
       )
     }
 
-    // 4. Busca próximo lote (busca 30 para poder filtrar pausados)
+    // 5. Busca próximo lote (respeitando next_retry_at)
+    const agora = new Date().toISOString()
     let query = supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
+      .or(`next_retry_at.is.null,next_retry_at.lte.${agora}`)
       .order('created_at', { ascending: true })
       .limit(30)
 
@@ -79,9 +81,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: filaError.message }, { status: 500 })
     }
 
-    // 5. Filtra pausadas e limita ao BATCH_SIZE
+    // 6. Filtra pausadas, suprimidas e limita ao BATCH_SIZE
     const fila = (filaRaw || [])
       .filter(item => !idsPausados.includes(item.campaign_id))
+      .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
       .slice(0, BATCH_SIZE)
 
     if (fila.length === 0) {
@@ -105,7 +108,7 @@ export async function POST(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // Reescreve links + injeta pixel + footer de descadastro
+      // Reescreve links + pixel + footer
       let htmlFinal = item.body || ''
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
@@ -137,7 +140,7 @@ export async function POST(request: Request) {
 
         await supabase
           .from('email_queue')
-          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0 })
           .eq('id', item.id)
 
         await supabase
@@ -149,29 +152,111 @@ export async function POST(request: Request) {
         enviados++
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
-        console.error('Erro envio:', item.recipient_email, err.message)
-        await supabase
-          .from('email_queue')
-          .update({ status: 'failed', error_log: err.message })
-          .eq('id', item.id)
+        // ===== CLASSIFICA O ERRO =====
+        const classificacao = classificarErro(err.message, err.response)
+        const retryCount = (item.retry_count || 0) + 1
+        const podeRetentar = classificacao.retryable && retryCount < 3
+
+        console.error(`Bounce ${classificacao.type} para ${item.recipient_email}:`, err.message)
+
+        // Log do bounce
+        await supabase.from('bounce_log').insert([{
+          email_queue_id: item.id,
+          campaign_id: item.campaign_id,
+          recipient_email: item.recipient_email,
+          bounce_type: classificacao.type,
+          error_code: classificacao.code,
+          error_message: err.message?.slice(0, 500),
+          smtp_account_id: contaAtual.id,
+        }])
+
+        if (podeRetentar) {
+          await supabase
+            .from('email_queue')
+            .update({
+              status: 'pending',
+              error_log: err.message?.slice(0, 500),
+              bounce_type: classificacao.type,
+              retry_count: retryCount,
+              next_retry_at: calcularProximaTentativa(retryCount).toISOString(),
+            })
+            .eq('id', item.id)
+        } else {
+          await supabase
+            .from('email_queue')
+            .update({
+              status: 'failed',
+              error_log: err.message?.slice(0, 500),
+              bounce_type: classificacao.type,
+              retry_count: retryCount,
+            })
+            .eq('id', item.id)
+
+          // Hard bounce ou complaint → bane o contato
+          if (classificacao.action === 'block_contact') {
+            await supabase
+              .from('contatos')
+              .update({
+                status: 'bounced',
+                last_bounce_at: new Date().toISOString(),
+                last_bounce_reason: err.message?.slice(0, 300),
+              })
+              .eq('email', (item.recipient_email || '').toLowerCase())
+
+            await supabase
+              .from('suppression_list')
+              .upsert([{
+                email: (item.recipient_email || '').toLowerCase(),
+                reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce',
+                original_error: err.message?.slice(0, 300),
+              }], { onConflict: 'email' })
+          }
+
+          // Soft bounce esgotado → incrementa contador no contato
+          if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
+            const { data: contato } = await supabase
+              .from('contatos')
+              .select('bounce_count')
+              .eq('email', (item.recipient_email || '').toLowerCase())
+              .single()
+
+            await supabase
+              .from('contatos')
+              .update({
+                bounce_count: (contato?.bounce_count || 0) + 1,
+                last_bounce_at: new Date().toISOString(),
+              })
+              .eq('email', (item.recipient_email || '').toLowerCase())
+          }
+
+          // Auth error → desativa conta SMTP
+          if (classificacao.action === 'disable_account') {
+            await supabase
+              .from('smtp_accounts')
+              .update({ is_active: false })
+              .eq('id', contaAtual.id)
+            console.error(`🚫 Conta ${contaAtual.email} desativada (auth error)`)
+          }
+        }
       }
     }
 
-    // 6. Quantos ainda restam (ignorando pausadas)
+    // 7. Conta restantes
+    const agoraContagem = new Date().toISOString()
     let countQuery = supabase
       .from('email_queue')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending')
+      .or(`next_retry_at.is.null,next_retry_at.lte.${agoraContagem}`)
     if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
 
     const { count: restantesRaw } = await countQuery
     const restantes = restantesRaw || 0
     const done = restantes === 0
 
-    // 7. Atualiza status das campanhas (só as que não estão pausadas)
+    // 8. Atualiza status das campanhas
     for (const cid of campaignIds) {
       if (idsPausados.includes(cid)) continue
-
       await supabase
         .from('campanhas')
         .update({ status: done ? 'Enviada' : 'Enviando...' })
@@ -186,11 +271,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      success: true,
-      processed: fila.length,
-      enviados,
-      restantes,
-      done,
+      success: true, processed: fila.length, enviados, restantes, done,
     })
   } catch (error: any) {
     console.error('ERRO /api/disparo/processar:', error)
