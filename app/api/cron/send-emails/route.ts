@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     const fila = filaRaw
       .filter(item => !idsPausados.includes(item.campaign_id))
       .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
-      .slice(0, 30)
+      .slice(0, 8)
 
     if (fila.length === 0) {
       return NextResponse.json({ message: 'Sem e-mails elegíveis.' })
