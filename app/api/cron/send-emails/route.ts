@@ -33,6 +33,10 @@ export async function GET(request: Request) {
 
   const supabase = createClient(supabaseUrl, supabaseKey)
 
+  // 🔍 DEBUG: mostra qual projeto Supabase está sendo usado
+  console.log(`🔗 SUPABASE URL EM USO: ${supabaseUrl}`)
+  console.log(`🔑 SERVICE KEY (primeiros 20): ${supabaseKey?.slice(0, 20)}...`)
+
   try {
     // 1. Ativa campanhas agendadas cujo horário já passou
     await supabase
