@@ -128,47 +128,14 @@ export default function ConfiguracoesPage() {
   }
 
   const alternarStatus = async (id: string, statusAtual: boolean) => {
-    const novoStatus = !statusAtual
-    const acao = novoStatus ? 'ativada' : 'pausada'
-
-    const { data, error } = await supabase
-      .from('smtp_accounts')
-      .update({ is_active: novoStatus })
-      .eq('id', id)
-      .select()
-
-    if (error) {
-      alert(`❌ Erro ao ${acao} conta: ${error.message}\n\nDetalhes: ${error.details || 'sem detalhes'}\nCódigo: ${error.code || 'sem código'}`)
-      console.error('Erro toggle:', error)
-      return
-    }
-
-    if (!data || data.length === 0) {
-      alert(`⚠️ Nenhuma linha atualizada. Provavelmente a conta não existe mais.`)
-      carregarServidores()
-      return
-    }
-
-    console.log(`✅ Conta ${acao} com sucesso. Novo status: ${data[0].is_active}`)
-    await carregarServidores()
+    await supabase.from('smtp_accounts').update({ is_active: !statusAtual }).eq('id', id)
+    carregarServidores()
   }
 
   const deletarServidor = async (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir este servidor permanentemente?\n\nEsta ação NÃO pode ser desfeita.')) return
-
-    const { error } = await supabase
-      .from('smtp_accounts')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      alert(`❌ Erro ao deletar: ${error.message}`)
-      console.error('Erro delete:', error)
-      return
-    }
-
-    console.log(`✅ Conta deletada (id: ${id})`)
-    await carregarServidores()
+    if (!confirm('Tem certeza que deseja excluir este servidor permanentemente?')) return
+    await supabase.from('smtp_accounts').delete().eq('id', id)
+    carregarServidores()
   }
 
   return (

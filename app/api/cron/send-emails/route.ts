@@ -62,8 +62,12 @@ export async function GET(request: Request) {
       .order('sent_today', { ascending: true })
 
     if (!contas || contas.length === 0) {
+      console.log('⚠️ NENHUMA CONTA ATIVA ENCONTRADA no banco. Verifique se as contas estão com is_active = true.')
       return NextResponse.json({ message: 'Sem contas disponíveis.' })
     }
+
+    // 🔍 DEBUG: mostra as contas que vão ser usadas
+    console.log('🔍 CONTAS ATIVAS:', contas.map((c: any) => `${c.sender_name} <${c.email}> (enviados hoje: ${c.sent_today})`).join(' | '))
 
     // 5. Lote (respeitando next_retry_at)
     const agora = new Date().toISOString()
@@ -137,6 +141,9 @@ export async function GET(request: Request) {
 
         htmlFinal += footer + pixel
       }
+
+      // 🔍 DEBUG: mostra qual conta está enviando
+      console.log(`📤 Enviando para ${item.recipient_email} usando conta: ${contaAtual.email} (id: ${contaAtual.id})`)
 
       try {
         await transporter.sendMail({
