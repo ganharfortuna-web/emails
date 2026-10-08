@@ -6,23 +6,9 @@ import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const tokenQuery = searchParams.get('token')
-  const tokenHeader = request.headers.get('authorization')?.replace('Bearer ', '')
+const BATCH_SIZE = 8
 
-  const tokenRecebido = tokenHeader || tokenQuery
-  const tokenEsperado = process.env.CRON_SECRET
-
-  if (!tokenEsperado) {
-    console.error('❌ CRON_SECRET não configurado')
-    return NextResponse.json({ error: 'CRON_SECRET não configurado' }, { status: 500 })
-  }
-
-  if (tokenRecebido !== tokenEsperado) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  }
-
+export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
@@ -34,12 +20,22 @@ export async function GET(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
-    // 1. Ativa campanhas agendadas cujo horário já passou
-    await supabase
-      .from('campanhas')
-      .update({ status: 'Em Fila' })
-      .eq('status', 'Agendada')
-      .lte('scheduled_at', new Date().toISOString())
+    const { campanhaId } = await request.json().catch(() => ({}))
+
+    // 1. Se veio campanha específica, verifica se está pausada
+    if (campanhaId) {
+      const { data: camp } = await supabase
+        .from('campanhas')
+        .select('status')
+        .eq('id', campanhaId)
+        .single()
+
+      if (camp?.status === 'Pausada') {
+        return NextResponse.json({
+          success: true, processed: 0, enviados: 0, restantes: 0, done: false, pausada: true,
+        })
+      }
+    }
 
     // 2. Campanhas pausadas
     const { data: pausadas } = await supabase
@@ -62,12 +58,15 @@ export async function GET(request: Request) {
       .order('sent_today', { ascending: true })
 
     if (!contas || contas.length === 0) {
-      return NextResponse.json({ message: 'Sem contas disponíveis.' })
+      return NextResponse.json(
+        { error: 'Limite diário de todas as contas atingido.', done: true, restantes: 0, enviados: 0 },
+        { status: 200 }
+      )
     }
 
-    // 5. Lote (respeitando next_retry_at)
+    // 5. Próximo lote (respeitando next_retry_at)
     const agora = new Date().toISOString()
-    const { data: filaRaw, error: filaError } = await supabase
+    let query = supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
@@ -75,27 +74,32 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: true })
       .limit(30)
 
-    if (filaError || !filaRaw || filaRaw.length === 0) {
-      return NextResponse.json({ message: 'Nada pendente.' })
+    if (campanhaId) query = query.eq('campaign_id', campanhaId)
+
+    const { data: filaRaw, error: filaError } = await query
+
+    if (filaError) {
+      return NextResponse.json({ error: filaError.message }, { status: 500 })
     }
 
     // 6. Filtra pausadas + suprimidas
-    const fila = filaRaw
+    const fila = (filaRaw || [])
       .filter(item => !idsPausados.includes(item.campaign_id))
       .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
-      .slice(0, 8)
+      .slice(0, BATCH_SIZE)
 
     if (fila.length === 0) {
-      return NextResponse.json({ message: 'Sem e-mails elegíveis.' })
+      if (campanhaId && !idsPausados.includes(campanhaId)) {
+        await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaId)
+      }
+      return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: 0, done: true })
     }
 
     let enviados = 0
     const campaignIds = new Set<string | number>()
 
     for (const item of fila) {
-      // ✅ Rotação real: sempre pega a conta com menor uso
-      contas.sort((a: any, b: any) => (a.sent_today || 0) - (b.sent_today || 0))
-      const contaAtual = contas[0]
+      const contaAtual = contas[enviados % contas.length]
       if (!contaAtual) continue
 
       const transporter = nodemailer.createTransport({
@@ -158,15 +162,13 @@ export async function GET(request: Request) {
 
         contaAtual.sent_today = (contaAtual.sent_today || 0) + 1
         enviados++
-        // ✅ Move a conta usada para o fim (proxima iteracao pega a menos usada)
-        contas.push(contas.shift())
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
         const classificacao = classificarErro(err.message, err.response)
         const retryCount = (item.retry_count || 0) + 1
         const podeRetentar = classificacao.retryable && retryCount < 3
 
-        console.error(`[cron] Bounce ${classificacao.type} para ${item.recipient_email}:`, err.message)
+        console.error(`Bounce ${classificacao.type} para ${item.recipient_email}:`, err.message)
 
         await supabase.from('bounce_log').insert([{
           email_queue_id: item.id,
@@ -246,11 +248,27 @@ export async function GET(request: Request) {
       }
     }
 
-    // 7. Atualiza status das campanhas INDIVIDUALMENTE
-    for (const cid of campaignIds) {
+    // 7. Conta restantes
+    const agoraContagem = new Date().toISOString()
+    let countQuery = supabase
+      .from('email_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .or(`next_retry_at.is.null,next_retry_at.lte.${agoraContagem}`)
+    if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
+
+    const { count: restantesRaw } = await countQuery
+    const restantes = restantesRaw || 0
+    const done = restantes === 0
+
+    // 8. Atualiza status das campanhas INDIVIDUALMENTE
+    const campanhasParaAtualizar = new Set<string | number>(campaignIds)
+    if (campanhaId) campanhasParaAtualizar.add(campanhaId)
+
+    for (const cid of campanhasParaAtualizar) {
       if (idsPausados.includes(cid)) continue
 
-      const { count } = await supabase
+      const { count: pendentesDaCampanha } = await supabase
         .from('email_queue')
         .select('*', { count: 'exact', head: true })
         .eq('campaign_id', cid)
@@ -258,19 +276,15 @@ export async function GET(request: Request) {
 
       await supabase
         .from('campanhas')
-        .update({ status: (count || 0) === 0 ? 'Enviada' : 'Enviando...' })
+        .update({ status: (pendentesDaCampanha || 0) === 0 ? 'Enviada' : 'Enviando...' })
         .eq('id', cid)
     }
 
     return NextResponse.json({
-      success: true,
-      processed: fila.length,
-      enviados,
-      pausadas: idsPausados.length,
-      suprimidos: emailsSuprimidos.size,
+      success: true, processed: fila.length, enviados, restantes, done,
     })
   } catch (error: any) {
-    console.error('ERRO cron:', error)
+    console.error('ERRO /api/disparo/processar:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

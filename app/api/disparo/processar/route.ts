@@ -99,7 +99,9 @@ export async function POST(request: Request) {
     const campaignIds = new Set<string | number>()
 
     for (const item of fila) {
-      const contaAtual = contas[enviados % contas.length]
+      // ✅ Rotação real: sempre pega a conta com menor uso
+      contas.sort((a: any, b: any) => (a.sent_today || 0) - (b.sent_today || 0))
+      const contaAtual = contas[0]
       if (!contaAtual) continue
 
       const transporter = nodemailer.createTransport({
@@ -162,6 +164,8 @@ export async function POST(request: Request) {
 
         contaAtual.sent_today = (contaAtual.sent_today || 0) + 1
         enviados++
+        // ✅ Move a conta usada para o fim (proxima iteracao pega a menos usada)
+        contas.push(contas.shift())
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
         const classificacao = classificarErro(err.message, err.response)
