@@ -8,7 +8,17 @@ import dynamic from 'next/dynamic'
 // @ts-ignore
 import 'react-quill/dist/quill.snow.css'
 
-const ReactQuill = dynamic(() => import('react-quill'), {
+const ReactQuill = dynamic(async () => {
+  const { default: RQ } = await import('react-quill')
+  const Quill = (await import('quill')).default
+  const Size = Quill.import('attributors/class/size') as any
+  Size.whitelist = ['10px', '11px', '12px', '13px', '14px', '15px', '16px', '18px', '20px', '22px', '24px', '28px', '32px']
+  Quill.register(Size, true)
+  const Font = Quill.import('attributors/class/font') as any
+  Font.whitelist = ['arial', 'helvetica', 'verdana', 'georgia', 'times-new-roman', 'courier-new', 'tahoma']
+  Quill.register(Font, true)
+  return RQ
+}, {
   ssr: false,
   loading: () => <p className="p-4 text-slate-400 text-sm font-medium">Carregando editor visual...</p>
 })
@@ -20,10 +30,15 @@ const supabase = createClient(
 
 const modulosEditor = {
   toolbar: [
-    [{ 'font': [] }], [{ 'size': ['small', false, 'large', 'huge'] }],
-    [{ 'header': [1, 2, 3, false] }], ['bold', 'italic', 'underline', 'strike'],
-    [{ 'color': [] }, { 'background': [] }], [{ 'align': [] }],
-    [{ 'list': 'ordered'}, { 'list': 'bullet' }], ['link'], ['clean']
+    [{ 'font': ['arial', 'helvetica', 'verdana', 'georgia', 'times-new-roman', 'courier-new', 'tahoma'] }],
+    [{ 'size': ['10px', '11px', '12px', '13px', '14px', '15px', '16px', '18px', '20px', '22px', '24px', '28px', '32px', false] }],
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'color': [] }, { 'background': [] }],
+    [{ 'align': [] }],
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    ['link'],
+    ['clean']
   ],
 }
 
