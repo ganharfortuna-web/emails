@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
+import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,11 +103,14 @@ export async function GET(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // ===== PERSONALIZAÇÃO POR DESTINATÁRIO =====
+      // ===== PERSONALIZAÇÃO =====
       let corpoPersonalizado = item.body || ''
       corpoPersonalizado = corpoPersonalizado
         .replace(/\{\{email\}\}/gi, item.recipient_email || '')
         .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+
+      // ===== FORMATAÇÃO PARA E-MAIL (inline CSS) =====
+      corpoPersonalizado = prepararHtmlEmail(corpoPersonalizado)
 
       // ===== REESCREVE LINKS + PIXEL + FOOTER =====
       let htmlFinal = corpoPersonalizado
@@ -126,7 +130,6 @@ export async function GET(request: Request) {
   Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong>
 </p>
 <p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">
-  Você está recebendo porque se cadastrou em nossa lista.<br/>
   Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.
 </p>`
 
@@ -239,7 +242,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // 7. Atualiza status das campanhas
+    // 7. Atualiza status das campanhas INDIVIDUALMENTE
     for (const cid of campaignIds) {
       if (idsPausados.includes(cid)) continue
 

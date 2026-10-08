@@ -28,8 +28,8 @@ const modulosEditor = {
 }
 
 type StatsItem = {
-  abertos: number
-  abertosBrutos: number
+  abertos: number         // aberturas REAIS (sem bots/MPP/prefetch)
+  abertosBrutos: number   // qualquer hit (real + prefetch + mpp)
   reabertos: number
   clicados: number
   total: number
@@ -59,6 +59,7 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
 
+  // Modal de detalhes + segmentação
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
@@ -120,11 +121,13 @@ export default function AutomacoesPage() {
       if (item.status === 'pending') agrupado[key].pendentes++
       if (item.status === 'failed') agrupado[key].falhados++
 
+      // ✅ Abertura REAL (passou pelos filtros de bot/MPP/prefetch)
       if ((item.open_real_count || 0) > 0) {
         agrupado[key].abertos++
         if (item.open_real_count > 1) agrupado[key].reabertos++
       }
 
+      // 📊 Qualquer hit (inclui prefetch, MPP, mas NÃO conta como aberto real)
       if ((item.open_real_count || 0) > 0 || (item.open_prefetch_count || 0) > 0) {
         agrupado[key].abertosBrutos++
       }
@@ -180,16 +183,6 @@ export default function AutomacoesPage() {
     if (modalDetalhes?.id === campanha.id) {
       setModalDetalhes({ ...modalDetalhes, status: novoStatus })
     }
-  }
-
-  // --- REUTILIZAR CAMPANHA ---
-  const reutilizarCampanha = (campanha: any) => {
-    if (!confirm(`Carregar "${campanha.assunto}" no editor?\n\nVocê poderá editar e reenviar.`)) return
-    setListaSelecionada(campanha.lista_id || '')
-    setAssunto(campanha.assunto || '')
-    setMensagem(campanha.mensagem || '')
-    setScheduledAt('')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   // --- CRIAR SEGMENTO A PARTIR DE CAMPANHA ---
@@ -281,6 +274,7 @@ export default function AutomacoesPage() {
       return
     }
 
+    // Considera não abriu quem não tem abertura REAL
     const naoAbriram = data.filter(d => !d.open_real_count || d.open_real_count === 0).length
     if (naoAbriram === 0) {
       alert('🎉 Todos já abriram de verdade! Nada para reenviar.')
@@ -588,7 +582,7 @@ export default function AutomacoesPage() {
                                 <span className="flex items-center gap-1 text-blue-600" title="Enviados">
                                   <Send className="size-3" /> {st.enviados}/{st.total}
                                 </span>
-                                <span className="flex items-center gap-1 text-emerald-600" title="Abriram de verdade">
+                                <span className="flex items-center gap-1 text-emerald-600" title="Abriram de verdade (sem MPP/bot/prefetch)">
                                   <Eye className="size-3" /> {st.abertos}
                                   {st.enviados > 0 && (
                                     <span className="text-[10px] opacity-70">
@@ -597,7 +591,7 @@ export default function AutomacoesPage() {
                                   )}
                                 </span>
                                 {st.reabertos > 0 && (
-                                  <span className="flex items-center gap-1 text-orange-600" title="Leads quentes">
+                                  <span className="flex items-center gap-1 text-orange-600" title="Leads quentes (2+ aberturas reais)">
                                     <Flame className="size-3" /> {st.reabertos}
                                   </span>
                                 )}
@@ -624,10 +618,6 @@ export default function AutomacoesPage() {
                             <button onClick={() => { setModalDetalhes(campanha); setMsgSucesso(''); setNomeNovaLista('') }}
                               className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1">
                               <BarChart3 className="size-3" /> Ver desempenho
-                            </button>
-                            <button onClick={() => reutilizarCampanha(campanha)}
-                              className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1">
-                              <Copy className="size-3" /> Reutilizar
                             </button>
                             {(campanha.status === 'Em Fila' || campanha.status === 'Enviando...') && (
                               <button onClick={() => alternarPausa(campanha)}
@@ -678,7 +668,7 @@ export default function AutomacoesPage() {
               <li>• Aberturas filtram Apple MPP, bots e prefetch</li>
               <li>• CTOR = cliques ÷ aberturas reais</li>
               <li>• Pause e retome campanhas a qualquer momento</li>
-              <li>• Reutilize campanhas antigas para editar e reenviar</li>
+              <li>• Crie segmentos a partir de aberturas/cliques</li>
             </ul>
           </div>
         </div>
@@ -695,6 +685,7 @@ export default function AutomacoesPage() {
         return (
           <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
+              {/* Header */}
               <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-start justify-between gap-4 rounded-t-2xl">
                 <div className="min-w-0">
                   <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
@@ -708,8 +699,10 @@ export default function AutomacoesPage() {
                 </button>
               </div>
 
+              {/* Corpo */}
               <div className="p-6 space-y-6">
 
+                {/* Progresso */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Progresso do envio</span>
@@ -729,6 +722,7 @@ export default function AutomacoesPage() {
                   </div>
                 </div>
 
+                {/* Cards principais */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
                     <Send className="size-5 text-blue-600 mx-auto mb-1" />
@@ -758,6 +752,7 @@ export default function AutomacoesPage() {
                   </div>
                 </div>
 
+                {/* CTOR — Card destaque */}
                 {st.abertos > 0 && (
                   <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
                     <div className="flex items-center justify-between mb-2">
@@ -803,6 +798,7 @@ export default function AutomacoesPage() {
                   </div>
                 )}
 
+                {/* Criar segmento */}
                 <div className="border-t border-slate-100 pt-6">
                   <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
                     <Users className="size-4 text-indigo-600" /> Criar segmento
@@ -859,6 +855,7 @@ export default function AutomacoesPage() {
                   )}
                 </div>
 
+                {/* Ações */}
                 <div className="border-t border-slate-100 pt-4 flex flex-wrap gap-2">
                   {modalDetalhes.status === 'Pausada' ? (
                     <button
@@ -878,12 +875,6 @@ export default function AutomacoesPage() {
                     onClick={() => { setModalDetalhes(null); abrirModalReenvio(modalDetalhes) }}
                     className="px-4 py-2 rounded-lg font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center gap-2 text-sm">
                     <RotateCcw className="size-4" /> Reenviar p/ não abriram
-                  </button>
-
-                  <button
-                    onClick={() => { setModalDetalhes(null); reutilizarCampanha(modalDetalhes) }}
-                    className="px-4 py-2 rounded-lg font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 flex items-center gap-2 text-sm">
-                    <Copy className="size-4" /> Reutilizar campanha
                   </button>
                 </div>
               </div>

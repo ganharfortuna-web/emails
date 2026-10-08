@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
+import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
       (suprimidos || []).map(s => (s.email || '').toLowerCase())
     )
 
-    // 4. Contas ativas ordenadas pela menos usada
+    // 4. Contas ativas
     const { data: contas } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -108,11 +109,14 @@ export async function POST(request: Request) {
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
       })
 
-      // ===== PERSONALIZAÇÃO POR DESTINATÁRIO =====
+      // ===== PERSONALIZAÇÃO =====
       let corpoPersonalizado = item.body || ''
       corpoPersonalizado = corpoPersonalizado
         .replace(/\{\{email\}\}/gi, item.recipient_email || '')
         .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+
+      // ===== FORMATAÇÃO PARA E-MAIL (inline CSS) =====
+      corpoPersonalizado = prepararHtmlEmail(corpoPersonalizado)
 
       // ===== REESCREVE LINKS + PIXEL + FOOTER =====
       let htmlFinal = corpoPersonalizado
@@ -132,7 +136,6 @@ export async function POST(request: Request) {
   Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong>
 </p>
 <p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">
-  <br/>
   Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.
 </p>`
 
@@ -258,20 +261,23 @@ export async function POST(request: Request) {
     const restantes = restantesRaw || 0
     const done = restantes === 0
 
-    // 8. Atualiza status das campanhas
-    for (const cid of campaignIds) {
-      if (idsPausados.includes(cid)) continue
-      await supabase
-        .from('campanhas')
-        .update({ status: done ? 'Enviada' : 'Enviando...' })
-        .eq('id', cid)
-    }
+    // 8. Atualiza status das campanhas INDIVIDUALMENTE
+    const campanhasParaAtualizar = new Set<string | number>(campaignIds)
+    if (campanhaId) campanhasParaAtualizar.add(campanhaId)
 
-    if (campanhaId && !campaignIds.has(campanhaId) && !idsPausados.includes(campanhaId)) {
+    for (const cid of campanhasParaAtualizar) {
+      if (idsPausados.includes(cid)) continue
+
+      const { count: pendentesDaCampanha } = await supabase
+        .from('email_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', cid)
+        .eq('status', 'pending')
+
       await supabase
         .from('campanhas')
-        .update({ status: done ? 'Enviada' : 'Enviando...' })
-        .eq('id', campanhaId)
+        .update({ status: (pendentesDaCampanha || 0) === 0 ? 'Enviada' : 'Enviando...' })
+        .eq('id', cid)
     }
 
     return NextResponse.json({
