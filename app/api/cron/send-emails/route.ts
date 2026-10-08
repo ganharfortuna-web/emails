@@ -162,12 +162,22 @@ export async function GET(request: Request) {
           .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0 })
           .eq('id', item.id)
 
+        // ✅ Re-lê o valor atual do banco (evita conflito entre lotes)
+        const { data: contaFresh } = await supabase
+          .from('smtp_accounts')
+          .select('sent_today')
+          .eq('id', contaAtual.id)
+          .single()
+
+        const novoSentToday = (contaFresh?.sent_today || 0) + 1
+
         await supabase
           .from('smtp_accounts')
-          .update({ sent_today: (contaAtual.sent_today || 0) + 1 })
+          .update({ sent_today: novoSentToday })
           .eq('id', contaAtual.id)
 
-        contaAtual.sent_today = (contaAtual.sent_today || 0) + 1
+        console.log(`📊 ${contaAtual.email}: sent_today = ${novoSentToday}`)
+        contaAtual.sent_today = novoSentToday
         enviados++
         // ✅ Move a conta usada para o fim (proxima iteracao pega a menos usada)
         contas.push(contas.shift())
