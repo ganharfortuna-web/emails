@@ -132,7 +132,7 @@ export async function POST(request: Request) {
   Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong>
 </p>
 <p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">
-  Você está recebendo porque se cadastrou em nossa lista.<br/>
+  <br/>
   Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.
 </p>`
 
