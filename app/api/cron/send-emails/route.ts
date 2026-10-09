@@ -159,7 +159,12 @@ export async function GET(request: Request) {
 
         await supabase
           .from('email_queue')
-          .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0 })
+          .update({ 
+            status: 'sent', 
+            sent_at: new Date().toISOString(), 
+            retry_count: 0,
+            smtp_account_id: contaAtual.id 
+          })
           .eq('id', item.id)
 
         // ✅ Re-lê o valor atual do banco (evita conflito entre lotes)
