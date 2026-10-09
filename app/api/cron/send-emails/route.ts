@@ -38,6 +38,8 @@ export async function GET(request: Request) {
   console.log(`🔑 SERVICE KEY (primeiros 20): ${supabaseKey?.slice(0, 20)}...`)
 
   try {
+    console.log('🔴🔴🔴 DEPLOY V3 - 09/10 11:30 - PROVA DEFINITIVA 🔴🔴🔴')
+
     // 1. Ativa campanhas agendadas cujo horário já passou
     await supabase
       .from('campanhas')
@@ -70,20 +72,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Sem contas disponíveis.' })
     }
 
-    // 🚨 TESTE DEFINITIVO — mostra TUDO que o banco retorna
-    const { data: todasDoBanco, count: totalSemFiltro } = await supabase
-      .from('smtp_accounts')
-      .select('email, is_active', { count: 'exact' })
-
-    console.log('🚨 ============================================')
-    console.log('🚨 URL EM USO:', supabaseUrl)
-    console.log('🚨 KEY (primeiros 30):', supabaseKey?.slice(0, 30))
-    console.log('🚨 TOTAL DE CONTAS (sem filtro):', totalSemFiltro)
-    console.log('🚨 EMAILS E STATUS:', JSON.stringify(todasDoBanco))
-    console.log('🚨 CONTAS APÓS FILTRO is_active=true E sent_today<450:')
-    console.log('🔍 CONTAS ATIVAS:', contas.map((c: any) => `${c.email} (${c.sent_today})`).join(' | '))
-    console.log('🚨 ============================================')
-
+    
     // 5. Lote (respeitando next_retry_at)
     const agora = new Date().toISOString()
     const { data: filaRaw, error: filaError } = await supabase
