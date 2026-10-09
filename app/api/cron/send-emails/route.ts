@@ -60,12 +60,25 @@ export async function GET(request: Request) {
     )
 
     // 4. Contas ativas
-    const { data: contas } = await supabase
+    console.log('🔥 ULTRA_DEBUG_V5 - INICIO')
+
+    const { data: debugAll, error: debugErr } = await supabase
+      .from('smtp_accounts')
+      .select('id, email, is_active, sent_today')
+
+    console.log('🔥 SEM FILTRO:', JSON.stringify(debugAll))
+    console.log('🔥 ERRO SEM FILTRO:', debugErr?.message || 'nenhum')
+
+    const { data: contas, error: contasError } = await supabase
       .from('smtp_accounts')
       .select('*')
       .eq('is_active', true)
       .lt('sent_today', 450)
       .order('sent_today', { ascending: true })
+
+    console.log('🔥 FILTRADAS:', (contas || []).map((x: any) => x.email).join(' | '))
+    console.log('🔥 ERRO FILTRO:', contasError?.message || 'nenhum')
+    console.log('🔥 ULTRA_DEBUG_V5 - FIM')
 
     if (!contas || contas.length === 0) {
       console.log('⚠️ NENHUMA CONTA ATIVA ENCONTRADA no banco. Verifique se as contas estão com is_active = true.')
