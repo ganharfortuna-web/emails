@@ -70,8 +70,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Sem contas disponíveis.' })
     }
 
-    // 🔍 DEBUG: mostra as contas que vão ser usadas
-    console.log('🔍 CONTAS ATIVAS:', contas.map((c: any) => `${c.sender_name} <${c.email}> (enviados hoje: ${c.sent_today})`).join(' | '))
+    // 🚨 TESTE DEFINITIVO — mostra TUDO que o banco retorna
+    const { data: todasDoBanco, count: totalSemFiltro } = await supabase
+      .from('smtp_accounts')
+      .select('email, is_active', { count: 'exact' })
+
+    console.log('🚨 ============================================')
+    console.log('🚨 URL EM USO:', supabaseUrl)
+    console.log('🚨 KEY (primeiros 30):', supabaseKey?.slice(0, 30))
+    console.log('🚨 TOTAL DE CONTAS (sem filtro):', totalSemFiltro)
+    console.log('🚨 EMAILS E STATUS:', JSON.stringify(todasDoBanco))
+    console.log('🚨 CONTAS APÓS FILTRO is_active=true E sent_today<450:')
+    console.log('🔍 CONTAS ATIVAS:', contas.map((c: any) => `${c.email} (${c.sent_today})`).join(' | '))
+    console.log('🚨 ============================================')
 
     // 5. Lote (respeitando next_retry_at)
     const agora = new Date().toISOString()
