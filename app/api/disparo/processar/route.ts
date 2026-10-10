@@ -154,7 +154,12 @@ export async function POST(request: Request) {
 
         await supabase
           .from('email_queue')
-          .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0 })
+          .update({ 
+            status: 'sent', 
+            sent_at: new Date().toISOString(), 
+            retry_count: 0,
+            smtp_account_id: contaAtual.id 
+          })
           .eq('id', item.id)
 
         await supabase
