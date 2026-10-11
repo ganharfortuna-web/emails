@@ -25,6 +25,9 @@ export async function GET(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
+    // 0. Consolida métricas nas campanhas ANTES de apagar
+    await supabase.rpc('consolidar_metricas_campanhas' as any)
+
     // 1. Apaga e-mails (sent/failed) antigos
     const dataLimiteEmails = new Date()
     dataLimiteEmails.setDate(dataLimiteEmails.getDate() - CONFIG.DIAS_RETENCAO_EMAILS)
