@@ -3,10 +3,11 @@ import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 import { prepararHtmlEmail } from '@/lib/email-html'
+import { getBatchSize } from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
 
-const BATCH_SIZE = 8
+const BATCH_SIZE = getBatchSize()
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL

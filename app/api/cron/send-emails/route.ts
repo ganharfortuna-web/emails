@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 import { prepararHtmlEmail } from '@/lib/email-html'
+import { getBatchSize } from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -106,7 +107,7 @@ export async function GET(request: Request) {
     const fila = filaRaw
       .filter(item => !idsPausados.includes(item.campaign_id))
       .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
-      .slice(0, 8)
+      .slice(0, getBatchSize())
 
     if (fila.length === 0) {
       return NextResponse.json({ message: 'Sem e-mails elegíveis.' })
