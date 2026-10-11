@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Server, Plus, Trash2, Power, Loader2, Mail, Globe, Edit, X, Save } from 'lucide-react'
+import { Server, Plus, Trash2, Power, Loader2, Mail, Globe, Edit, X, Save, AlertCircle } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -23,11 +23,10 @@ export default function ConfiguracoesPage() {
   const [carregando, setCarregando] = useState(true)
   const [modoCriacao, setModoCriacao] = useState(false)
   const [salvando, setSalvando] = useState(false)
-
-  // Estado de edição
   const [editandoId, setEditandoId] = useState<string | null>(null)
-
   const [novoServidor, setNovoServidor] = useState({ ...FORM_VAZIO })
+  const [msgDebug, setMsgDebug] = useState<string | null>(null)
+  const [processandoId, setProcessandoId] = useState<string | null>(null)
 
   useEffect(() => {
     carregarServidores()
@@ -35,11 +34,15 @@ export default function ConfiguracoesPage() {
 
   const carregarServidores = async () => {
     setCarregando(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('smtp_accounts')
       .select('*')
       .order('created_at', { ascending: false })
-    if (data) setServidores(data)
+    if (error) {
+      setMsgDebug(`Erro ao carregar: ${error.message}`)
+    } else if (data) {
+      setServidores(data)
+    }
     setCarregando(false)
   }
 
@@ -63,10 +66,11 @@ export default function ConfiguracoesPage() {
     if (!error) {
       setModoCriacao(false)
       setNovoServidor({ ...FORM_VAZIO })
-      carregarServidores()
+      await carregarServidores()
+      setMsgDebug(`✅ Servidor cadastrado com sucesso!`)
+      setTimeout(() => setMsgDebug(null), 3000)
     } else {
-      alert('Erro ao salvar: ' + error.message)
-      console.error(error)
+      setMsgDebug(`❌ Erro: ${error.message}`)
     }
     setSalvando(false)
   }
@@ -80,10 +84,9 @@ export default function ConfiguracoesPage() {
       host: servidor.host || '',
       porta: servidor.port ? String(servidor.port) : '',
       usuario: servidor.email || '',
-      senha: '', // ⚠️ Não preencher por segurança
+      senha: '',
       remetente: servidor.sender_email || '',
     })
-    // Scroll para o topo (formulário)
     setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
   }
 
@@ -97,7 +100,6 @@ export default function ConfiguracoesPage() {
     if (!editandoId) return
     setSalvando(true)
 
-    // Monta os dados para atualizar
     const updateData: any = {
       sender_name:  novoServidor.nome,
       type:         novoServidor.tipo,
@@ -107,7 +109,6 @@ export default function ConfiguracoesPage() {
       sender_email: novoServidor.remetente,
     }
 
-    // ⚠️ Só atualiza senha se foi digitada
     if (novoServidor.senha && novoServidor.senha.trim() !== '') {
       updateData.app_password = novoServidor.senha
     }
@@ -119,66 +120,142 @@ export default function ConfiguracoesPage() {
 
     if (!error) {
       cancelarEdicao()
-      carregarServidores()
+      await carregarServidores()
+      setMsgDebug(`✅ Servidor atualizado!`)
+      setTimeout(() => setMsgDebug(null), 3000)
     } else {
-      alert('Erro ao editar: ' + error.message)
-      console.error(error)
+      setMsgDebug(`❌ Erro: ${error.message}`)
     }
     setSalvando(false)
   }
 
+  // --- PAUSAR / ATIVAR ---
   const alternarStatus = async (id: string, statusAtual: boolean) => {
+    setProcessandoId(id)
     const novoStatus = !statusAtual
-    const acao = novoStatus ? 'ativada' : 'pausada'
 
     const { data, error } = await supabase
       .from('smtp_accounts')
       .update({ is_active: novoStatus })
       .eq('id', id)
-      .select()
+      .select('id, email, is_active')
 
     if (error) {
-      alert(`❌ Erro ao ${acao} conta: ${error.message}\n\nDetalhes: ${error.details || 'sem detalhes'}\nCódigo: ${error.code || 'sem código'}`)
-      console.error('Erro toggle:', error)
+      setMsgDebug(`❌ Erro ao atualizar: ${error.message}`)
+      setProcessandoId(null)
       return
     }
 
     if (!data || data.length === 0) {
-      alert(`⚠️ Nenhuma linha atualizada. Provavelmente a conta não existe mais.`)
-      carregarServidores()
+      setMsgDebug(`⚠️ Nenhuma linha atualizada. Conta pode não existir mais.`)
+      await carregarServidores()
+      setProcessandoId(null)
       return
     }
 
-    console.log(`✅ Conta ${acao} com sucesso. Novo status: ${data[0].is_active}`)
+    setMsgDebug(`✅ Conta ${novoStatus ? 'ativada' : 'pausada'}: ${data[0].email}`)
     await carregarServidores()
+    setProcessandoId(null)
+    setTimeout(() => setMsgDebug(null), 3000)
   }
 
-  const deletarServidor = async (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir este servidor permanentemente?\n\nEsta ação NÃO pode ser desfeita.')) return
+  // --- DELETAR ---
+  const deletarServidor = async (id: string, email: string) => {
+    const confirmacao = prompt(
+      `⚠️ ATENÇÃO: Excluir PERMANENTEMENTE a conta:\n\n${email}\n\n` +
+      `Digite EXCLUIR (em maiúsculas) para confirmar:`
+    )
+    
+    if (confirmacao !== 'EXCLUIR') {
+      setMsgDebug('❌ Exclusão cancelada.')
+      setTimeout(() => setMsgDebug(null), 2000)
+      return
+    }
+
+    setProcessandoId(id)
+
+    // 1. Deleta
+    const { error: errDelete, count } = await supabase
+      .from('smtp_accounts')
+      .delete({ count: 'exact' })
+      .eq('id', id)
+
+    if (errDelete) {
+      setMsgDebug(`❌ Erro ao deletar: ${errDelete.message}`)
+      setProcessandoId(null)
+      return
+    }
+
+    if (count === 0) {
+      setMsgDebug(`⚠️ Nenhuma linha deletada. Verifique se a conta ainda existe.`)
+      setProcessandoId(null)
+      return
+    }
+
+    // 2. Confirma que sumiu do banco
+    const { data: verifica } = await supabase
+      .from('smtp_accounts')
+      .select('id')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (verifica) {
+      setMsgDebug(`⚠️ Conta ainda existe no banco! Recarregue a página (Ctrl+Shift+R).`)
+    } else {
+      setMsgDebug(`✅ Conta ${email} deletada PERMANENTEMENTE.`)
+    }
+
+    // 3. Recarrega
+    await carregarServidores()
+    setProcessandoId(null)
+    setTimeout(() => setMsgDebug(null), 5000)
+  }
+
+  // --- RESETAR CONTADOR ---
+  const resetarContador = async (id: string, email: string) => {
+    if (!confirm(`Resetar o contador de envios de "${email}" para 0?`)) return
+
+    setProcessandoId(id)
 
     const { error } = await supabase
       .from('smtp_accounts')
-      .delete()
+      .update({ sent_today: 0 })
       .eq('id', id)
 
     if (error) {
-      alert(`❌ Erro ao deletar: ${error.message}`)
-      console.error('Erro delete:', error)
-      return
+      setMsgDebug(`❌ Erro: ${error.message}`)
+    } else {
+      setMsgDebug(`✅ Contador resetado: ${email}`)
+      await carregarServidores()
     }
 
-    console.log(`✅ Conta deletada (id: ${id})`)
-    await carregarServidores()
+    setProcessandoId(null)
+    setTimeout(() => setMsgDebug(null), 3000)
   }
 
   return (
     <div className="max-w-6xl mx-auto">
 
+      {/* MENSAGEM DE DEBUG */}
+      {msgDebug && (
+        <div className={`mb-6 p-4 rounded-xl border-2 font-bold ${
+          msgDebug.startsWith('✅') ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+          : msgDebug.startsWith('⚠️') ? 'bg-amber-50 border-amber-300 text-amber-900'
+          : 'bg-rose-50 border-rose-300 text-rose-900'
+        }`}>
+          {msgDebug}
+        </div>
+      )}
+
       {/* CABEÇALHO */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
         <div>
           <h2 className="text-3xl font-black text-slate-900">Arsenal de Servidores</h2>
-          <p className="text-lg text-slate-600 mt-2">Cadastre e gerencie suas contas de Gmail e SMTP para rotacionar os envios.</p>
+          <p className="text-lg text-slate-600 mt-2">
+            {servidores.length} conta(s) cadastrada(s) ·{' '}
+            <strong>{servidores.filter(s => s.is_active).length} ativa(s)</strong> ·{' '}
+            {servidores.filter(s => !s.is_active).length} pausada(s)
+          </p>
         </div>
         <button
           onClick={() => {
@@ -209,7 +286,6 @@ export default function ConfiguracoesPage() {
                 type="button"
                 onClick={cancelarEdicao}
                 className="text-amber-700 hover:bg-amber-100 p-2 rounded-lg transition-colors"
-                title="Fechar edição"
               >
                 <X className="size-5" />
               </button>
@@ -353,15 +429,19 @@ export default function ConfiguracoesPage() {
         ) : (
           servidores.map(servidor => {
             const emEdicao = editandoId === servidor.id
+            const processando = processandoId === servidor.id
+
             return (
               <div
                 key={servidor.id}
                 className={`bg-white rounded-2xl border p-6 transition-all ${
                   emEdicao
                     ? 'border-amber-400 shadow-md ring-2 ring-amber-200'
-                    : servidor.is_active
-                      ? 'border-slate-200 shadow-sm'
-                      : 'border-dashed border-slate-300 opacity-60'
+                    : processando
+                      ? 'border-blue-400 shadow-md ring-2 ring-blue-200 opacity-70'
+                      : servidor.is_active
+                        ? 'border-slate-200 shadow-sm'
+                        : 'border-dashed border-slate-300 opacity-60'
                 }`}
               >
                 <div className="flex justify-between items-start mb-4">
@@ -378,7 +458,8 @@ export default function ConfiguracoesPage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => emEdicao ? cancelarEdicao() : iniciarEdicao(servidor)}
-                      className={`p-2 rounded-lg transition-colors ${
+                      disabled={processando}
+                      className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
                         emEdicao
                           ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                           : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -389,21 +470,23 @@ export default function ConfiguracoesPage() {
                     </button>
                     <button
                       onClick={() => alternarStatus(servidor.id, servidor.is_active)}
-                      className={`p-2 rounded-lg transition-colors ${
+                      disabled={processando}
+                      className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
                         servidor.is_active
                           ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
                           : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
                       }`}
                       title={servidor.is_active ? 'Pausar Conta' : 'Ativar Conta'}
                     >
-                      <Power className="size-5" />
+                      {processando ? <Loader2 className="size-5 animate-spin" /> : <Power className="size-5" />}
                     </button>
                     <button
-                      onClick={() => deletarServidor(servidor.id)}
-                      className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
-                      title="Deletar"
+                      onClick={() => deletarServidor(servidor.id, servidor.email)}
+                      disabled={processando}
+                      className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors disabled:opacity-50"
+                      title="Deletar Permanentemente"
                     >
-                      <Trash2 className="size-5" />
+                      {processando ? <Loader2 className="size-5 animate-spin" /> : <Trash2 className="size-5" />}
                     </button>
                   </div>
                 </div>
@@ -414,7 +497,23 @@ export default function ConfiguracoesPage() {
                   {servidor.type === 'smtp' && (
                     <p><strong className="text-slate-800">Host:</strong> {servidor.host}:{servidor.port}</p>
                   )}
-                  <p><strong className="text-slate-800">Envios hoje:</strong> {servidor.sent_today || 0} / 450</p>
+                  <div className="flex items-center justify-between">
+                    <p><strong className="text-slate-800">Envios hoje:</strong> {servidor.sent_today || 0} / 450</p>
+                    <button
+                      onClick={() => resetarContador(servidor.id, servidor.email)}
+                      className="text-xs font-bold text-slate-500 hover:text-blue-600"
+                      title="Resetar contador"
+                    >
+                      Resetar
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 pt-1">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      servidor.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {servidor.is_active ? '● ATIVA' : '○ PAUSADA'}
+                    </span>
+                  </div>
                 </div>
 
                 {emEdicao && (

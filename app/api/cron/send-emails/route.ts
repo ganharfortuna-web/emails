@@ -5,6 +5,8 @@ import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
+export const fetchCache = 'force-no-store'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
