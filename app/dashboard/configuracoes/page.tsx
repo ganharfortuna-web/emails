@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Server, Plus, Trash2, Power, Loader2, Mail, Globe, Edit, X, Save, AlertCircle } from 'lucide-react'
+import { Server, Plus, Trash2, Power, Loader2, Mail, Globe, Edit, X, Save, Zap } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -15,8 +15,11 @@ const FORM_VAZIO = {
   porta: '',
   usuario: '',
   senha: '',
-  remetente: ''
+  remetente: '',
+  daily_limit: 50
 }
+
+const PRESETS = [20, 50, 100, 200, 450, 1000, 2000]
 
 export default function ConfiguracoesPage() {
   const [servidores, setServidores] = useState<any[]>([])
@@ -61,13 +64,14 @@ export default function ConfiguracoesPage() {
       sender_email: novoServidor.remetente,
       is_active:    true,
       sent_today:   0,
+      daily_limit:  novoServidor.daily_limit || 50,
     }])
 
     if (!error) {
       setModoCriacao(false)
       setNovoServidor({ ...FORM_VAZIO })
       await carregarServidores()
-      setMsgDebug(`✅ Servidor cadastrado com sucesso!`)
+      setMsgDebug(`✅ Servidor cadastrado com limite de ${novoServidor.daily_limit}/dia`)
       setTimeout(() => setMsgDebug(null), 3000)
     } else {
       setMsgDebug(`❌ Erro: ${error.message}`)
@@ -86,6 +90,7 @@ export default function ConfiguracoesPage() {
       usuario: servidor.email || '',
       senha: '',
       remetente: servidor.sender_email || '',
+      daily_limit: servidor.daily_limit || 50,
     })
     setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
   }
@@ -107,6 +112,7 @@ export default function ConfiguracoesPage() {
       port:         Number(novoServidor.porta) || 587,
       email:        novoServidor.usuario,
       sender_email: novoServidor.remetente,
+      daily_limit:  novoServidor.daily_limit || 50,
     }
 
     if (novoServidor.senha && novoServidor.senha.trim() !== '') {
@@ -140,15 +146,8 @@ export default function ConfiguracoesPage() {
       .eq('id', id)
       .select('id, email, is_active')
 
-    if (error) {
-      setMsgDebug(`❌ Erro ao atualizar: ${error.message}`)
-      setProcessandoId(null)
-      return
-    }
-
-    if (!data || data.length === 0) {
-      setMsgDebug(`⚠️ Nenhuma linha atualizada. Conta pode não existir mais.`)
-      await carregarServidores()
+    if (error || !data || data.length === 0) {
+      setMsgDebug(`❌ Erro ao atualizar`)
       setProcessandoId(null)
       return
     }
@@ -162,81 +161,92 @@ export default function ConfiguracoesPage() {
   // --- DELETAR ---
   const deletarServidor = async (id: string, email: string) => {
     const confirmacao = prompt(
-      `⚠️ ATENÇÃO: Excluir PERMANENTEMENTE a conta:\n\n${email}\n\n` +
-      `Digite EXCLUIR (em maiúsculas) para confirmar:`
+      `⚠️ Excluir PERMANENTEMENTE a conta:\n\n${email}\n\n` +
+      `Digite EXCLUIR para confirmar:`
     )
-    
-    if (confirmacao !== 'EXCLUIR') {
-      setMsgDebug('❌ Exclusão cancelada.')
-      setTimeout(() => setMsgDebug(null), 2000)
-      return
-    }
+    if (confirmacao !== 'EXCLUIR') return
 
     setProcessandoId(id)
-
-    // 1. Deleta
-    const { error: errDelete, count } = await supabase
+    const { error, count } = await supabase
       .from('smtp_accounts')
       .delete({ count: 'exact' })
       .eq('id', id)
 
-    if (errDelete) {
-      setMsgDebug(`❌ Erro ao deletar: ${errDelete.message}`)
-      setProcessandoId(null)
-      return
-    }
-
-    if (count === 0) {
-      setMsgDebug(`⚠️ Nenhuma linha deletada. Verifique se a conta ainda existe.`)
-      setProcessandoId(null)
-      return
-    }
-
-    // 2. Confirma que sumiu do banco
-    const { data: verifica } = await supabase
-      .from('smtp_accounts')
-      .select('id')
-      .eq('id', id)
-      .maybeSingle()
-
-    if (verifica) {
-      setMsgDebug(`⚠️ Conta ainda existe no banco! Recarregue a página (Ctrl+Shift+R).`)
+    if (error || count === 0) {
+      setMsgDebug(`❌ Erro ao deletar`)
     } else {
-      setMsgDebug(`✅ Conta ${email} deletada PERMANENTEMENTE.`)
+      setMsgDebug(`✅ Conta ${email} deletada`)
     }
-
-    // 3. Recarrega
     await carregarServidores()
     setProcessandoId(null)
-    setTimeout(() => setMsgDebug(null), 5000)
+    setTimeout(() => setMsgDebug(null), 4000)
   }
 
-  // --- RESETAR CONTADOR ---
-  const resetarContador = async (id: string, email: string) => {
-    if (!confirm(`Resetar o contador de envios de "${email}" para 0?`)) return
-
+  // --- ALTERAR LIMITE INDIVIDUAL (rápido, direto do card) ---
+  const alterarLimiteIndividual = async (id: string, email: string, novoLimite: number) => {
     setProcessandoId(id)
-
     const { error } = await supabase
       .from('smtp_accounts')
-      .update({ sent_today: 0 })
+      .update({ daily_limit: novoLimite })
       .eq('id', id)
 
     if (error) {
       setMsgDebug(`❌ Erro: ${error.message}`)
     } else {
-      setMsgDebug(`✅ Contador resetado: ${email}`)
+      setMsgDebug(`✅ ${email} → limite ${novoLimite}/dia`)
       await carregarServidores()
     }
-
     setProcessandoId(null)
     setTimeout(() => setMsgDebug(null), 3000)
   }
 
+  // --- APLICAR LIMITE A TODAS ---
+  const aplicarLimiteTodas = async (limite: number) => {
+    if (!confirm(`Aplicar limite de ${limite}/dia para TODAS as contas ativas?`)) return
+
+    setProcessandoId('todas')
+    const { error, count } = await supabase
+      .from('smtp_accounts')
+      .update({ daily_limit: limite }, { count: 'exact' })
+      .eq('is_active', true)
+
+    if (error) {
+      setMsgDebug(`❌ Erro: ${error.message}`)
+    } else {
+      setMsgDebug(`✅ Limite ${limite}/dia aplicado em ${count} conta(s)`)
+      await carregarServidores()
+    }
+    setProcessandoId(null)
+    setTimeout(() => setMsgDebug(null), 4000)
+  }
+
+  // --- RESETAR CONTADORES ---
+  const resetarContadores = async () => {
+    if (!confirm('Resetar o contador de envios de TODAS as contas?')) return
+    setProcessandoId('todas')
+    const { error } = await supabase
+      .from('smtp_accounts')
+      .update({ sent_today: 0 })
+      .gte('sent_today', 0)
+
+    if (error) {
+      setMsgDebug(`❌ Erro: ${error.message}`)
+    } else {
+      setMsgDebug(`✅ Contadores resetados`)
+      await carregarServidores()
+    }
+    setProcessandoId(null)
+    setTimeout(() => setMsgDebug(null), 3000)
+  }
+
+  const totalAtivas = servidores.filter(s => s.is_active).length
+  const totalPausadas = servidores.filter(s => !s.is_active).length
+  const totalEnviadosHoje = servidores.reduce((acc, s) => acc + (s.sent_today || 0), 0)
+  const totalCapacidade = servidores.filter(s => s.is_active).reduce((acc, s) => acc + (s.daily_limit || 50), 0)
+
   return (
     <div className="max-w-6xl mx-auto">
 
-      {/* MENSAGEM DE DEBUG */}
       {msgDebug && (
         <div className={`mb-6 p-4 rounded-xl border-2 font-bold ${
           msgDebug.startsWith('✅') ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
@@ -252,9 +262,12 @@ export default function ConfiguracoesPage() {
         <div>
           <h2 className="text-3xl font-black text-slate-900">Arsenal de Servidores</h2>
           <p className="text-lg text-slate-600 mt-2">
-            {servidores.length} conta(s) cadastrada(s) ·{' '}
-            <strong>{servidores.filter(s => s.is_active).length} ativa(s)</strong> ·{' '}
-            {servidores.filter(s => !s.is_active).length} pausada(s)
+            <strong>{servidores.length}</strong> contas ·{' '}
+            <strong className="text-emerald-600">{totalAtivas} ativas</strong> ·{' '}
+            <strong className="text-slate-500">{totalPausadas} pausadas</strong>
+          </p>
+          <p className="text-sm text-slate-500 mt-1">
+            Enviados hoje: <strong>{totalEnviadosHoje}</strong> de <strong>{totalCapacidade}</strong> possíveis
           </p>
         </div>
         <button
@@ -268,25 +281,44 @@ export default function ConfiguracoesPage() {
         </button>
       </div>
 
-      {/* FORMULÁRIO DE CRIAÇÃO / EDIÇÃO */}
+      {/* AÇÕES EM LOTE */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-8">
+        <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
+          <Zap className="size-4 text-amber-600" /> Ações rápidas para TODAS as contas ativas
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          <span className="text-xs font-bold text-slate-500 self-center mr-2">Aplicar limite:</span>
+          {PRESETS.map(p => (
+            <button
+              key={p}
+              onClick={() => aplicarLimiteTodas(p)}
+              disabled={processandoId === 'todas'}
+              className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-colors disabled:opacity-50"
+            >
+              {p}/dia
+            </button>
+          ))}
+          <button
+            onClick={resetarContadores}
+            disabled={processandoId === 'todas'}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors disabled:opacity-50 ml-auto"
+          >
+            Resetar contadores do dia
+          </button>
+        </div>
+      </div>
+
+      {/* FORMULÁRIO */}
       {(modoCriacao || editandoId) && (
         <div className={`border p-6 rounded-2xl mb-8 shadow-sm ${
           editandoId ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'
         }`}>
           <div className="flex items-center justify-between mb-4">
             <h3 className={`font-bold text-lg flex items-center gap-2 ${editandoId ? 'text-amber-900' : 'text-slate-800'}`}>
-              {editandoId ? (
-                <><Edit className="size-5" /> Editando Servidor</>
-              ) : (
-                <><Plus className="size-5" /> Novo Servidor</>
-              )}
+              {editandoId ? <><Edit className="size-5" /> Editando Servidor</> : <><Plus className="size-5" /> Novo Servidor</>}
             </h3>
             {editandoId && (
-              <button
-                type="button"
-                onClick={cancelarEdicao}
-                className="text-amber-700 hover:bg-amber-100 p-2 rounded-lg transition-colors"
-              >
+              <button type="button" onClick={cancelarEdicao} className="text-amber-700 hover:bg-amber-100 p-2 rounded-lg">
                 <X className="size-5" />
               </button>
             )}
@@ -297,22 +329,16 @@ export default function ConfiguracoesPage() {
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Nome de Identificação</label>
-                <input
-                  required
-                  type="text"
-                  value={novoServidor.nome}
+                <input required type="text" value={novoServidor.nome}
                   onChange={e => setNovoServidor({ ...novoServidor, nome: e.target.value })}
                   placeholder="Ex: Gmail Atendimento 01"
-                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white"
-                />
+                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">Tipo de Servidor</label>
-                <select
-                  value={novoServidor.tipo}
+                <select value={novoServidor.tipo}
                   onChange={e => setNovoServidor({ ...novoServidor, tipo: e.target.value })}
-                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900"
-                >
+                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900">
                   <option value="gmail">Google Gmail</option>
                   <option value="smtp">SMTP Externo (Hostinger, AWS, etc)</option>
                 </select>
@@ -323,100 +349,94 @@ export default function ConfiguracoesPage() {
               <div className="grid md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Host SMTP</label>
-                  <input
-                    required={novoServidor.tipo === 'smtp'}
-                    type="text"
-                    value={novoServidor.host}
+                  <input required={novoServidor.tipo === 'smtp'} type="text" value={novoServidor.host}
                     onChange={e => setNovoServidor({ ...novoServidor, host: e.target.value })}
                     placeholder="Ex: smtp.hostinger.com"
-                    className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white"
-                  />
+                    className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Porta SMTP</label>
-                  <input
-                    required={novoServidor.tipo === 'smtp'}
-                    type="text"
-                    value={novoServidor.porta}
+                  <input required={novoServidor.tipo === 'smtp'} type="text" value={novoServidor.porta}
                     onChange={e => setNovoServidor({ ...novoServidor, porta: e.target.value })}
                     placeholder="Ex: 465"
-                    className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white"
-                  />
+                    className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
                 </div>
               </div>
             )}
 
             <div className="grid md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">E-mail de Login (Usuário)</label>
-                <input
-                  required
-                  type="email"
-                  value={novoServidor.usuario}
+                <label className="block text-sm font-bold text-slate-700 mb-1">E-mail de Login</label>
+                <input required type="email" value={novoServidor.usuario}
                   onChange={e => setNovoServidor({ ...novoServidor, usuario: e.target.value })}
                   placeholder="email@gmail.com"
-                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white"
-                />
+                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  Senha (ou Senha de App)
-                  {editandoId && <span className="text-xs font-normal text-amber-700 ml-2">(deixe vazio para manter)</span>}
+                  Senha de App {editandoId && <span className="text-xs font-normal text-amber-700">(vazio = manter)</span>}
                 </label>
-                <input
-                  required={!editandoId}
-                  type="password"
-                  value={novoServidor.senha}
+                <input required={!editandoId} type="password" value={novoServidor.senha}
                   onChange={e => setNovoServidor({ ...novoServidor, senha: e.target.value })}
-                  placeholder={editandoId ? '•••••••• (manter senha atual)' : '••••••••••••'}
-                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white"
-                />
+                  placeholder={editandoId ? '•••• (manter senha)' : '••••••••••••'}
+                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
-                E-mail do Remetente (o que o cliente vê na caixa de entrada)
-              </label>
-              <input
-                required
-                type="email"
-                value={novoServidor.remetente}
-                onChange={e => setNovoServidor({ ...novoServidor, remetente: e.target.value })}
-                placeholder="contato@seudominio.com"
-                className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white"
-              />
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">E-mail do Remetente (o que o cliente vê)</label>
+                <input required type="email" value={novoServidor.remetente}
+                  onChange={e => setNovoServidor({ ...novoServidor, remetente: e.target.value })}
+                  placeholder="contato@seudominio.com"
+                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1">
+                  Limite diário desta conta
+                </label>
+                <div className="flex gap-2">
+                  <input type="number" min={1} max={100000} value={novoServidor.daily_limit}
+                    onChange={e => setNovoServidor({ ...novoServidor, daily_limit: Number(e.target.value) || 50 })}
+                    className="w-24 p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white font-bold" />
+                  <div className="flex flex-wrap gap-1">
+                    {PRESETS.map(p => (
+                      <button key={p} type="button"
+                        onClick={() => setNovoServidor({ ...novoServidor, daily_limit: p })}
+                        className={`text-xs font-bold px-2 py-1 rounded border transition-colors ${
+                          novoServidor.daily_limit === p
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white border-slate-200 text-slate-600 hover:border-blue-400'
+                        }`}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">💡 Conta Gmail nova: use 20-50. Conta antiga: 450. SMTP pago: quanto quiser.</p>
+              </div>
             </div>
 
             <div className="flex gap-3 justify-end pt-4 border-t border-slate-200">
-              <button
-                type="button"
+              <button type="button"
                 onClick={editandoId ? cancelarEdicao : () => { setModoCriacao(false); setNovoServidor({ ...FORM_VAZIO }) }}
-                className="px-6 py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-              >
+                className="px-6 py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">
                 Cancelar
               </button>
-              <button
-                type="submit"
-                disabled={salvando}
-                className={`px-6 py-3 font-bold text-white rounded-lg flex items-center gap-2 shadow-sm disabled:opacity-50 transition-colors ${
+              <button type="submit" disabled={salvando}
+                className={`px-6 py-3 font-bold text-white rounded-lg flex items-center gap-2 disabled:opacity-50 ${
                   editandoId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                {salvando ? (
-                  <><Loader2 className="size-5 animate-spin" /> Salvando...</>
-                ) : editandoId ? (
-                  <><Save className="size-5" /> Salvar Alterações</>
-                ) : (
-                  <><Plus className="size-5" /> Salvar Servidor</>
-                )}
+                }`}>
+                {salvando ? <><Loader2 className="size-5 animate-spin" /> Salvando...</>
+                  : editandoId ? <><Save className="size-5" /> Salvar Alterações</>
+                  : <><Plus className="size-5" /> Salvar Servidor</>}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* LISTA DE SERVIDORES */}
+      {/* LISTA */}
       <div className="grid lg:grid-cols-2 gap-6">
         {carregando ? (
           <div className="col-span-full p-12 flex justify-center">
@@ -424,26 +444,24 @@ export default function ConfiguracoesPage() {
           </div>
         ) : servidores.length === 0 ? (
           <div className="col-span-full p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-500 font-medium">
-            Nenhum servidor cadastrado. Clique no botão azul acima para adicionar sua primeira conta.
+            Nenhum servidor cadastrado.
           </div>
         ) : (
           servidores.map(servidor => {
             const emEdicao = editandoId === servidor.id
             const processando = processandoId === servidor.id
+            const limite = servidor.daily_limit || 50
+            const usado = servidor.sent_today || 0
+            const percentual = limite > 0 ? Math.min((usado / limite) * 100, 100) : 0
 
             return (
-              <div
-                key={servidor.id}
+              <div key={servidor.id}
                 className={`bg-white rounded-2xl border p-6 transition-all ${
-                  emEdicao
-                    ? 'border-amber-400 shadow-md ring-2 ring-amber-200'
-                    : processando
-                      ? 'border-blue-400 shadow-md ring-2 ring-blue-200 opacity-70'
-                      : servidor.is_active
-                        ? 'border-slate-200 shadow-sm'
-                        : 'border-dashed border-slate-300 opacity-60'
-                }`}
-              >
+                  emEdicao ? 'border-amber-400 shadow-md ring-2 ring-amber-200'
+                  : processando ? 'border-blue-400 shadow-md opacity-70'
+                  : servidor.is_active ? 'border-slate-200 shadow-sm'
+                  : 'border-dashed border-slate-300 opacity-60'
+                }`}>
                 <div className="flex justify-between items-start mb-4">
                   <div className="flex items-center gap-4">
                     <div className={`p-3 rounded-xl ${servidor.type === 'gmail' ? 'bg-red-50 text-red-600' : 'bg-indigo-50 text-indigo-600'}`}>
@@ -454,59 +472,58 @@ export default function ConfiguracoesPage() {
                       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{servidor.type}</span>
                     </div>
                   </div>
-
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => emEdicao ? cancelarEdicao() : iniciarEdicao(servidor)}
-                      disabled={processando}
-                      className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
-                        emEdicao
-                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                          : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                      }`}
-                      title={emEdicao ? 'Cancelar edição' : 'Editar'}
-                    >
+                    <button onClick={() => emEdicao ? cancelarEdicao() : iniciarEdicao(servidor)} disabled={processando}
+                      className={`p-2 rounded-lg disabled:opacity-50 ${emEdicao ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
                       {emEdicao ? <X className="size-5" /> : <Edit className="size-5" />}
                     </button>
-                    <button
-                      onClick={() => alternarStatus(servidor.id, servidor.is_active)}
-                      disabled={processando}
-                      className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
-                        servidor.is_active
-                          ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
-                          : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                      }`}
-                      title={servidor.is_active ? 'Pausar Conta' : 'Ativar Conta'}
-                    >
+                    <button onClick={() => alternarStatus(servidor.id, servidor.is_active)} disabled={processando}
+                      className={`p-2 rounded-lg disabled:opacity-50 ${
+                        servidor.is_active ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400'
+                      }`}>
                       {processando ? <Loader2 className="size-5 animate-spin" /> : <Power className="size-5" />}
                     </button>
-                    <button
-                      onClick={() => deletarServidor(servidor.id, servidor.email)}
-                      disabled={processando}
-                      className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors disabled:opacity-50"
-                      title="Deletar Permanentemente"
-                    >
+                    <button onClick={() => deletarServidor(servidor.id, servidor.email)} disabled={processando}
+                      className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg disabled:opacity-50">
                       {processando ? <Loader2 className="size-5 animate-spin" /> : <Trash2 className="size-5" />}
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-2 text-sm text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-100 break-words">
-                  <p><strong className="text-slate-800">Login:</strong> {servidor.email}</p>
-                  <p><strong className="text-slate-800">Remetente:</strong> {servidor.sender_email}</p>
-                  {servidor.type === 'smtp' && (
-                    <p><strong className="text-slate-800">Host:</strong> {servidor.host}:{servidor.port}</p>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <p><strong className="text-slate-800">Envios hoje:</strong> {servidor.sent_today || 0} / 450</p>
-                    <button
-                      onClick={() => resetarContador(servidor.id, servidor.email)}
-                      className="text-xs font-bold text-slate-500 hover:text-blue-600"
-                      title="Resetar contador"
-                    >
-                      Resetar
-                    </button>
+                <div className="space-y-3 text-sm text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <p className="break-words"><strong className="text-slate-800">Login:</strong> {servidor.email}</p>
+                  <p className="break-words"><strong className="text-slate-800">Remetente:</strong> {servidor.sender_email}</p>
+
+                  {/* BARRA DE PROGRESSO */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-slate-700">Envios hoje</span>
+                      <span className="text-xs font-bold text-slate-900">{usado} / {limite}</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div className={`h-full transition-all ${
+                        percentual >= 90 ? 'bg-rose-500' : percentual >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
+                      }`} style={{ width: `${percentual}%` }} />
+                    </div>
                   </div>
+
+                  {/* CONTROLE RÁPIDO DE LIMITE */}
+                  <div className="pt-2 border-t border-slate-200">
+                    <label className="text-xs font-bold text-slate-500 block mb-1">Limite diário:</label>
+                    <div className="flex flex-wrap gap-1">
+                      {PRESETS.map(p => (
+                        <button key={p}
+                          onClick={() => alterarLimiteIndividual(servidor.id, servidor.email, p)}
+                          disabled={processando || limite === p}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors disabled:opacity-50 ${
+                            limite === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'
+                          }`}>
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex items-center gap-1 pt-1">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                       servidor.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'

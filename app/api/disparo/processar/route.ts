@@ -50,12 +50,17 @@ export async function POST(request: Request) {
     )
 
     // 4. Contas ativas
-    const { data: contas } = await supabase
+    // Busca todas as contas ativas (o limite é por conta agora)
+    const { data: contasRaw } = await supabase
       .from('smtp_accounts')
       .select('*')
       .eq('is_active', true)
-      .lt('sent_today', 450)
       .order('sent_today', { ascending: true })
+
+    // Filtra por daily_limit individual de cada conta
+    const contas = (contasRaw || []).filter(
+      (c: any) => (c.sent_today || 0) < (c.daily_limit || 50)
+    )
 
     if (!contas || contas.length === 0) {
       return NextResponse.json(
