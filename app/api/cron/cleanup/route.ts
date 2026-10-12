@@ -48,7 +48,12 @@ export async function GET(request: Request) {
       .lt('created_at', dataLimiteBounces.toISOString())
 
     // 3. Apaga e-mails órfãos (campanha deletada)
-    await supabase.rpc('delete_orphan_emails' as any).catch(() => {})
+    try {
+      await supabase.rpc('delete_orphan_emails' as any)
+    } catch (e) {
+      // Ignora erro se a função ainda não existir no banco
+      console.log('delete_orphan_emails não disponível (opcional)')
+    }
 
     // 4. Estatísticas atuais do banco
     const { count: totalEmails } = await supabase
