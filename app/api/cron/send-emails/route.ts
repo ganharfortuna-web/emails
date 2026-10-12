@@ -127,6 +127,10 @@ export async function GET(request: Request) {
         port: contaAtual.port || 587,
         secure: contaAtual.port === 465,
         auth: { user: contaAtual.email, pass: contaAtual.app_password },
+        tls: { rejectUnauthorized: false },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
       })
 
       // ===== PERSONALIZAÇÃO =====
