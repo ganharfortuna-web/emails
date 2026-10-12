@@ -367,10 +367,10 @@ export default function ConfiguracoesPage() {
             <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">E-mail de Login</label>
-                <input required type="email" value={novoServidor.usuario}
+                <input required type="text" value={novoServidor.usuario}
                   onChange={e => setNovoServidor({ ...novoServidor, usuario: e.target.value })}
-                  placeholder="email@gmail.com"
-                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white" />
+                  placeholder="E-mail, chave de API ou usuário SMTP"
+                  className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white font-mono text-sm" />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
