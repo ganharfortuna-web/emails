@@ -156,10 +156,17 @@ export async function POST(request: Request) {
 
       try {
         await transporter.sendMail({
-          from: `"${contaAtual.sender_name}" <${contaAtual.sender_email || contaAtual.email}>`,
+          from: {
+            name: (contaAtual.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''),
+            address: contaAtual.sender_email || contaAtual.email,
+          },
           to: item.recipient_email,
           subject: item.subject,
           html: htmlFinal,
+          encoding: 'utf-8',
+          headers: {
+            'Content-Type': 'text/html; charset=UTF-8',
+          },
         })
 
         await supabase
