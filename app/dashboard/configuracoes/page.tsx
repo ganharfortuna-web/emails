@@ -433,7 +433,7 @@ export default function ConfiguracoesPage() {
             )}
           </div>
 
-          <form onSubmit={editandoId ? salvarEdicao : salvarServidor} className="space-y-4">
+          <form onSubmit={editandoId ? salvarEdicao : salvarServidor} className="space-y-4" noValidate>
 
             <div className="grid md:grid-cols-2 gap-4">
               <div>
@@ -480,6 +480,7 @@ export default function ConfiguracoesPage() {
                   Usuário / Login SMTP *
                 </label>
                 <input required type="text" value={novoServidor.usuario}
+                  autoComplete="off"
                   onChange={e => setNovoServidor({ ...novoServidor, usuario: e.target.value })}
                   placeholder={providerAtual.precisaUsuarioEmail ? 'email@gmail.com' : 'Ex: apikey'}
                   className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white font-mono text-sm" />
