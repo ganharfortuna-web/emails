@@ -171,7 +171,7 @@ export async function GET(request: Request) {
 
       try {
         await transporter.sendMail({
-          from: `"${contaAtual.sender_name}" <${contaAtual.email}>`,
+          from: `"${contaAtual.sender_name}" <${contaAtual.sender_email || contaAtual.email}>`,
           to: item.recipient_email,
           subject: item.subject,
           html: htmlFinal,
