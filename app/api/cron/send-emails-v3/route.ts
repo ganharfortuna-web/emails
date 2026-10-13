@@ -46,6 +46,9 @@ export async function GET(request: Request) {
       connectionTimeout: 5000,
       greetingTimeout: 3000,
       socketTimeout: 5000,
+      connectionTimeout: 5000,
+      greetingTimeout: 3000,
+      socketTimeout: 5000,
     })
 
     const { data: fila } = await supabase.from('email_queue').select('*')
