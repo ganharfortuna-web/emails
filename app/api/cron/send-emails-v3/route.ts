@@ -43,9 +43,6 @@ export async function GET(request: Request) {
       secure: Number(conta.port) === 465,
       auth: { user: conta.email, pass: conta.app_password },
       tls: { rejectUnauthorized: false },
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 100,
     })
 
     const { data: fila } = await supabase.from('email_queue').select('*')
