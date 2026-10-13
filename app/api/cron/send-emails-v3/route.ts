@@ -63,36 +63,47 @@ export async function GET(request: Request) {
     const fromEmail = conta.sender_email || conta.email
     const fromNome = (conta.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, '').trim() || 'Equipe'
 
-    const resultados = await Promise.all(filaFiltrada.map(async (item: any) => {
-      try {
-        const corpo = (item.body || '')
-          .replace(/\{\{email\}\}/gi, item.recipient_email || '')
-          .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+    // ⭐ ENVIO EM BLOCOS DE 5 (evita ECONNRESET do ipz)
+    const BLOCO = 5
+    const resultados: any[] = []
 
-        const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email)}`
-        const htmlFinal = `<div style="font-family:Arial,sans-serif;color:#333;">${corpo}<hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0;" /><p style="font-size:11px;color:#94a3b8;text-align:center;">Este e-mail foi enviado para ${item.recipient_email}.<br/><a href="${unsubUrl}" style="color:#64748b;">Descadastrar</a></p>${baseUrl ? `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />` : ''}</div>`
+    for (let i = 0; i < filaFiltrada.length; i += BLOCO) {
+      const bloco = filaFiltrada.slice(i, i + BLOCO)
 
-        await transporter.sendMail({
-          from: `"${fromNome}" <${fromEmail}>`,
-          to: item.recipient_email,
-          subject: item.subject,
-          html: htmlFinal,
-        })
+      const promessas = bloco.map(async (item: any) => {
+        try {
+          const corpo = (item.body || '')
+            .replace(/\{\{email\}\}/gi, item.recipient_email || '')
+            .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
 
-        await supabase.from('email_queue').update({
-          status: 'sent', sent_at: new Date().toISOString(), smtp_account_id: conta.id,
-        }).eq('id', item.id)
+          const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email)}`
+          const htmlFinal = `<div style="font-family:Arial,sans-serif;color:#333;">${corpo}<hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0;" /><p style="font-size:11px;color:#94a3b8;text-align:center;">Este e-mail foi enviado para ${item.recipient_email}.<br/><a href="${unsubUrl}" style="color:#64748b;">Descadastrar</a></p>${baseUrl ? `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />` : ''}</div>`
 
-        console.log(`✅ ${item.recipient_email}`)
-        return { ok: true, campaign_id: item.campaign_id }
-      } catch (err: any) {
-        console.error(`❌ ${item.recipient_email}: ${err.message}`)
-        await supabase.from('email_queue').update({
-          status: 'failed', error_log: err.message?.slice(0, 500),
-        }).eq('id', item.id)
-        return { ok: false, campaign_id: item.campaign_id }
-      }
-    }))
+          await transporter.sendMail({
+            from: `"${fromNome}" <${fromEmail}>`,
+            to: item.recipient_email,
+            subject: item.subject,
+            html: htmlFinal,
+          })
+
+          await supabase.from('email_queue').update({
+            status: 'sent', sent_at: new Date().toISOString(), smtp_account_id: conta.id,
+          }).eq('id', item.id)
+
+          console.log(`✅ ${item.recipient_email}`)
+          return { ok: true, campaign_id: item.campaign_id }
+        } catch (err: any) {
+          console.error(`❌ ${item.recipient_email}: ${err.message}`)
+          await supabase.from('email_queue').update({
+            status: 'failed', error_log: err.message?.slice(0, 500),
+          }).eq('id', item.id)
+          return { ok: false, campaign_id: item.campaign_id }
+        }
+      })
+
+      const resBloco = await Promise.all(promessas)
+      resultados.push(...resBloco)
+    }
 
     const enviados = resultados.filter((r: any) => r.ok).length
     const campaignIds = new Set(resultados.map((r: any) => r.campaign_id).filter(Boolean))
