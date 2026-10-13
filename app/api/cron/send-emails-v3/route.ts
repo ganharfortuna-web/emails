@@ -46,9 +46,6 @@ export async function GET(request: Request) {
       connectionTimeout: 5000,
       greetingTimeout: 3000,
       socketTimeout: 5000,
-      connectionTimeout: 5000,
-      greetingTimeout: 3000,
-      socketTimeout: 5000,
     })
 
     const { data: fila } = await supabase.from('email_queue').select('*')
@@ -86,8 +83,10 @@ export async function GET(request: Request) {
           status: 'sent', sent_at: new Date().toISOString(), smtp_account_id: conta.id,
         }).eq('id', item.id)
 
+        console.log(`✅ ${item.recipient_email}`)
         return { ok: true, campaign_id: item.campaign_id }
       } catch (err: any) {
+        console.error(`❌ ${item.recipient_email}: ${err.message}`)
         await supabase.from('email_queue').update({
           status: 'failed', error_log: err.message?.slice(0, 500),
         }).eq('id', item.id)
@@ -115,6 +114,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, enviados, conta: conta.email })
   } catch (error: any) {
+    console.error('ERRO cron:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
