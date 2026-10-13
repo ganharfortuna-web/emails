@@ -43,10 +43,13 @@ export async function GET(request: Request) {
       secure: Number(conta.port) === 465,
       auth: { user: conta.email, pass: conta.app_password },
       tls: { rejectUnauthorized: false },
+      connectionTimeout: 5000,
+      greetingTimeout: 3000,
+      socketTimeout: 5000,
     })
 
     const { data: fila } = await supabase.from('email_queue').select('*')
-      .eq('status', 'pending').order('created_at', { ascending: true }).limit(10)
+      .eq('status', 'pending').order('created_at', { ascending: true }).limit(5)
 
     if (!fila || fila.length === 0) {
       return NextResponse.json({ message: 'Fila vazia.' })
