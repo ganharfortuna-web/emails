@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     })
 
     const { data: fila } = await supabase.from('email_queue').select('*')
-      .eq('status', 'pending').order('created_at', { ascending: true }).limit(5)
+      .eq('status', 'pending').order('created_at', { ascending: true }).limit(20)
 
     if (!fila || fila.length === 0) {
       return NextResponse.json({ message: 'Fila vazia.' })
