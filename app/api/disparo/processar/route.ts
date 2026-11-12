@@ -50,22 +50,25 @@ export async function POST(request: Request) {
       (suprimidos || []).map(s => (s.email || '').toLowerCase())
     )
 
-    // 4. Contas ativas
-    // Busca todas as contas ativas (o limite é por conta agora)
-    const { data: contasRaw } = await supabase
+    // 4. Busca apenas UMA conta ativa (removida a rotação)
+    const { data: contaUnica, error: contaError } = await supabase
       .from('smtp_accounts')
       .select('*')
       .eq('is_active', true)
-      .order('sent_today', { ascending: true })
+      .limit(1)
+      .single()
 
-    // Filtra por daily_limit individual de cada conta
-    const contas = (contasRaw || []).filter(
-      (c: any) => (c.sent_today || 0) < (c.daily_limit || 50)
-    )
-
-    if (!contas || contas.length === 0) {
+    if (contaError || !contaUnica) {
       return NextResponse.json(
-        { error: 'Limite diário de todas as contas atingido.', done: true, restantes: 0, enviados: 0 },
+        { error: 'Nenhuma conta de envio ativa encontrada no sistema.', done: true, restantes: 0, enviados: 0 },
+        { status: 400 }
+      )
+    }
+
+    // Verifica se a conta única atingiu o limite diário
+    if ((contaUnica.sent_today || 0) >= (contaUnica.daily_limit || 50)) {
+      return NextResponse.json(
+        { error: 'Limite diário da conta atingido.', done: true, restantes: 0, enviados: 0 },
         { status: 200 }
       )
     }
@@ -104,23 +107,19 @@ export async function POST(request: Request) {
     let enviados = 0
     const campaignIds = new Set<string | number>()
 
+    // Configura o transporter fixo com a única conta
+    const transporter = nodemailer.createTransport({
+      host: contaUnica.host || 'smtp.gmail.com',
+      port: contaUnica.port || 587,
+      secure: contaUnica.port === 465,
+      auth: { user: contaUnica.email, pass: contaUnica.app_password },
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
+    })
+
     for (const item of fila) {
-      // ✅ Rotação real: sempre pega a conta com menor uso
-      contas.sort((a: any, b: any) => (a.sent_today || 0) - (b.sent_today || 0))
-      const contaAtual = contas[0]
-      if (!contaAtual) continue
-
-      const transporter = nodemailer.createTransport({
-        host: contaAtual.host || 'smtp.gmail.com',
-        port: contaAtual.port || 587,
-        secure: contaAtual.port === 465,
-        auth: { user: contaAtual.email, pass: contaAtual.app_password },
-        tls: { rejectUnauthorized: false },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000,
-      })
-
       // ===== PERSONALIZAÇÃO =====
       let corpoPersonalizado = item.body || ''
       corpoPersonalizado = corpoPersonalizado
@@ -157,8 +156,8 @@ export async function POST(request: Request) {
       try {
         await transporter.sendMail({
           from: {
-            name: (contaAtual.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''),
-            address: contaAtual.sender_email || contaAtual.email,
+            name: (contaUnica.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''),
+            address: contaUnica.sender_email || contaUnica.email,
           },
           to: item.recipient_email,
           subject: item.subject,
@@ -175,19 +174,18 @@ export async function POST(request: Request) {
             status: 'sent', 
             sent_at: new Date().toISOString(), 
             retry_count: 0,
-            smtp_account_id: contaAtual.id 
+            smtp_account_id: contaUnica.id 
           })
           .eq('id', item.id)
 
         await supabase
           .from('smtp_accounts')
-          .update({ sent_today: (contaAtual.sent_today || 0) + 1 })
-          .eq('id', contaAtual.id)
+          .update({ sent_today: (contaUnica.sent_today || 0) + 1 })
+          .eq('id', contaUnica.id)
 
-        contaAtual.sent_today = (contaAtual.sent_today || 0) + 1
+        contaUnica.sent_today = (contaUnica.sent_today || 0) + 1
         enviados++
-        // ✅ Move a conta usada para o fim (proxima iteracao pega a menos usada)
-        contas.push(contas.shift())
+
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
         const classificacao = classificarErro(err.message, err.response)
@@ -203,7 +201,7 @@ export async function POST(request: Request) {
           bounce_type: classificacao.type,
           error_code: classificacao.code,
           error_message: err.message?.slice(0, 500),
-          smtp_account_id: contaAtual.id,
+          smtp_account_id: contaUnica.id,
         }])
 
         if (podeRetentar) {
@@ -267,8 +265,8 @@ export async function POST(request: Request) {
             await supabase
               .from('smtp_accounts')
               .update({ is_active: false })
-              .eq('id', contaAtual.id)
-            console.error(`🚫 Conta ${contaAtual.email} desativada (auth error)`)
+              .eq('id', contaUnica.id)
+            console.error(`🚫 Conta ${contaUnica.email} desativada (auth error)`)
           }
         }
       }
