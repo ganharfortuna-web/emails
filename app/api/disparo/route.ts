@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Campanha não encontrada' }, { status: 404 })
     }
 
-    // Busca contatos da lista COM PAGINAÇÃO (quebra o limite de 1000 do Supabase)
+    // 1. Busca contatos COM PAGINAÇÃO (para pegar todos os 3214)
     let todosContatos: any[] = []
     let page = 0
     const pageSize = 1000
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Nenhum contato ativo na lista' }, { status: 400 })
     }
 
-    // Remove duplicatas de e-mail
+    // 2. Remove e-mails duplicados da planilha
     const vistos = new Set<string>()
     const contatosUnicos = todosContatos.filter(c => {
       const emailLimpo = c.email?.toLowerCase().trim()
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       return true
     })
 
-    // Monta a fila
+    // 3. Monta a fila
     const fila = contatosUnicos.map(contato => ({
       campaign_id: campanha.id,
       recipient_email: contato.email.toLowerCase().trim(),
@@ -72,13 +72,14 @@ export async function POST(request: Request) {
       status: 'pending',
     }))
 
-    // Insere na fila (em blocos de 500)
+    // 4. Insere na fila EM BLOCOS de 500 (Evita estourar o limite do Supabase)
     for (let i = 0; i < fila.length; i += 500) {
       const bloco = fila.slice(i, i + 500)
       const { error: insertError } = await supabase.from('email_queue').insert(bloco)
       if (insertError) throw new Error('Erro ao inserir na fila: ' + insertError.message)
     }
 
+    // 5. Atualiza o status da campanha com o total real
     const novoStatus = campanha.scheduled_at ? 'Agendada' : 'Enviando...'
     await supabase.from('campanhas').update({ status: novoStatus, total_sent: fila.length }).eq('id', campanha.id)
 
