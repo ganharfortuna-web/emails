@@ -418,24 +418,26 @@ export default function AutomacoesPage() {
                 <div className="border-t pt-4">
                   <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
                   
-                  {/* ✅ CORES DOS TEXTOS DOS BOTÕES DE SEGMENTO CORRIGIDAS AQUI */}
+                  {/* ✅ AQUI ESTÃO AS QUANTIDADES DE VOLTA */}
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}>
                       <Eye className="size-4 mb-1 text-emerald-600"/>
                       <p className="text-xs font-bold text-slate-800">Abridores</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{st.abertos} contatos</p>
                     </button>
                     <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}>
                       <MousePointerClick className="size-4 mb-1 text-purple-600"/>
                       <p className="text-xs font-bold text-slate-800">Clicadores</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{st.clicados} contatos</p>
                     </button>
                     <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}>
                       <AlertCircle className="size-4 mb-1 text-amber-600"/>
                       <p className="text-xs font-bold text-slate-800">Não abriram</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p>
                     </button>
                   </div>
                   
                   <div className="flex gap-2">
-                    {/* ✅ TEXTO DO INPUT CORRIGIDO */}
                     <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm text-slate-800" />
                     <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm">{criandoLista ? 'Criando...' : 'Criar'}</button>
                   </div>
