@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { Loader2, Plus, ExternalLink, Image as ImageIcon, LayoutTemplate, Pencil, XCircle } from 'lucide-react'
+import { Loader2, Plus, ExternalLink, Image as ImageIcon, LayoutTemplate, Pencil, XCircle, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 
@@ -36,24 +36,30 @@ export default function PaginasBuilderPage() {
   const [paginas, setPaginas] = useState<any[]>([])
   const [salvando, setSalvando] = useState(false)
   const [sucesso, setSucesso] = useState('')
-
-  // Estado de controle de edição
   const [editandoId, setEditandoId] = useState<string | null>(null)
 
-  // Estados do formulário
+  // Estados do formulário principal
   const [titulo, setTitulo] = useState('')
   const [subtitulo, setSubtitulo] = useState('')
   const [slug, setSlug] = useState('')
   const [listaId, setListaId] = useState('')
   const [assunto, setAssunto] = useState('')
   const [corpo, setCorpo] = useState('')
-  const [redirectUrl, setRedirectUrl] = useState('')
   
-  // Estados Visuais
+  // Design
   const [bgColor, setBgColor] = useState('#0f172a')
   const [btnColor, setBtnColor] = useState('#ea580c')
   const [heroImageUrl, setHeroImageUrl] = useState('')
   const [layoutType, setLayoutType] = useState('left')
+
+  // Configurações da Página de Obrigado
+  const [thankYouType, setThankYouType] = useState('external')
+  const [redirectUrl, setRedirectUrl] = useState('')
+  const [thankYouTitle, setThankYouTitle] = useState('Tudo Certo!')
+  const [thankYouText, setThankYouText] = useState('')
+  const [thankYouWhatsapp, setThankYouWhatsapp] = useState('')
+  const [thankYouBtnLink, setThankYouBtnLink] = useState('')
+  const [thankYouBtnText, setThankYouBtnText] = useState('Baixar Material')
 
   useEffect(() => {
     supabase.from('listas').select('id, nome').then(({data}) => setListas(data || []))
@@ -67,78 +73,79 @@ export default function PaginasBuilderPage() {
 
   const limparFormulario = () => {
     setEditandoId(null)
-    setTitulo(''); setSubtitulo(''); setSlug(''); setAssunto(''); setCorpo(''); setRedirectUrl(''); setHeroImageUrl('')
-    setListaId('')
+    setTitulo(''); setSubtitulo(''); setSlug(''); setAssunto(''); setCorpo('');
+    setHeroImageUrl(''); setListaId(''); setRedirectUrl('')
     setBgColor('#0f172a'); setBtnColor('#ea580c'); setLayoutType('left')
+    setThankYouType('external')
+    setThankYouTitle('Tudo Certo!'); setThankYouText(''); setThankYouWhatsapp(''); setThankYouBtnLink(''); setThankYouBtnText('Baixar Material')
     setSucesso('')
   }
 
-  // Função para carregar página existente no formulário
   const handleEditar = (p: any) => {
     setEditandoId(p.id)
-    setTitulo(p.titulo)
-    setSubtitulo(p.subtitulo || '')
-    setSlug(p.slug)
-    setListaId(p.lista_id ? String(p.lista_id) : '')
-    setAssunto(p.email_assunto)
-    setCorpo(p.email_corpo)
-    setRedirectUrl(p.redirect_url)
-    setBgColor(p.bg_color || '#0f172a')
-    setBtnColor(p.button_color || '#ea580c')
-    setHeroImageUrl(p.hero_image_url || '')
-    setLayoutType(p.layout_type || 'left')
+    setTitulo(p.titulo); setSubtitulo(p.subtitulo || ''); setSlug(p.slug)
+    setListaId(p.lista_id ? String(p.lista_id) : ''); setAssunto(p.email_assunto); setCorpo(p.email_corpo)
+    setBgColor(p.bg_color || '#0f172a'); setBtnColor(p.button_color || '#ea580c')
+    setHeroImageUrl(p.hero_image_url || ''); setLayoutType(p.layout_type || 'left')
+    
+    setThankYouType(p.thank_you_type || 'external')
+    setRedirectUrl(p.redirect_url || '')
+    setThankYouTitle(p.thank_you_title || 'Tudo Certo!')
+    setThankYouText(p.thank_you_text || '')
+    setThankYouWhatsapp(p.thank_you_whatsapp || '')
+    setThankYouBtnLink(p.thank_you_btn_link || '')
+    setThankYouBtnText(p.thank_you_btn_text || 'Baixar Material')
+    
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // Templates Profissionais
   const aplicarTemplate = (tipo: string) => {
     limparFormulario()
+    setThankYouText('<p>Seu cadastro foi recebido com sucesso.</p><p>O link do material também foi enviado para o seu e-mail.</p><p>Caso prefira, clique no botão abaixo para acessar agora mesmo:</p>')
+    setThankYouType('internal')
+    setThankYouWhatsapp('5561982096982')
+    
     if (tipo === 'ebook') {
       setTitulo('Baixe o Guia Definitivo: Como Escalar sua Autoridade')
       setSubtitulo('Preencha os dados ao lado e receba o material exclusivo direto no seu e-mail.')
       setAssunto('O seu E-book exclusivo chegou!')
       setCorpo('<h2>Olá, {{nome}}!</h2><p>Obrigado por se inscrever. O seu material está pronto.</p><p><a href="LINK_DO_PDF">Clique aqui para fazer o download do E-book</a></p>')
-      setBgColor('#0f172a')
-      setBtnColor('#ea580c')
+      setBgColor('#0f172a'); setBtnColor('#ea580c')
       setHeroImageUrl('https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=1000&auto=format&fit=crop')
+      setThankYouBtnLink('https://exemplo.com/seu-ebook.pdf')
+      setThankYouBtnText('Baixar E-book Agora')
     } else if (tipo === 'webinar') {
       setTitulo('Webinar Exclusivo: O Futuro do Marketing Digital')
       setSubtitulo('Garanta sua vaga gratuita e receba o link de acesso diretamente no seu e-mail.')
       setAssunto('Sua vaga para o Webinar está garantida!')
       setCorpo('<h2>Olá, {{nome}}!</h2><p>Sua vaga está reservada. O link de acesso será enviado minutos antes do evento.</p><p><a href="LINK_DO_EVENTO">Acessar a sala do Webinar</a></p>')
-      setBgColor('#1e1b4b')
-      setBtnColor('#10b981')
+      setBgColor('#1e1b4b'); setBtnColor('#10b981')
       setHeroImageUrl('https://images.unsplash.com/photo-1591115765373-5207764f72e7?q=80&w=1000&auto=format&fit=crop')
-    } else if (tipo === 'consultoria') {
-      setTitulo('Descubra como dobrar o faturamento da sua empresa')
-      setSubtitulo('Preencha o formulário e receba um diagnóstico gratuito da sua operação.')
-      setAssunto('Recebemos o seu pedido de diagnóstico!')
-      setCorpo('<h2>Olá, {{nome}}!</h2><p>Nossa equipe já recebeu os seus dados e entrará em contato pelo WhatsApp em breve para agendar a sua consultoria.</p>')
-      setBgColor('#111827')
-      setBtnColor('#3b82f6')
-      setHeroImageUrl('https://images.unsplash.com/photo-1556761175-5973dc0f32d7?q=80&w=1000&auto=format&fit=crop')
+      setThankYouBtnLink('https://exemplo.com/sala-do-webinar')
+      setThankYouBtnText('Entrar no Webinar')
     }
   }
 
   const handleCriar = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSalvando(true)
-    setSucesso('')
+    setSalvando(true); setSucesso('')
     
-    // Validação básica do editor
     const textoLimpo = corpo.replace(/<[^>]*>?/gm, '').trim()
-    if (!textoLimpo) {
-      alert("O corpo do e-mail não pode estar vazio.")
-      setSalvando(false)
-      return
-    }
+    if (!textoLimpo) { alert("O corpo do e-mail não pode estar vazio."); setSalvando(false); return }
 
     const slugFormatado = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 
     const payload = {
       titulo, subtitulo, slug: slugFormatado, lista_id: listaId,
-      email_assunto: assunto, email_corpo: corpo, redirect_url: redirectUrl,
-      bg_color: bgColor, button_color: btnColor, hero_image_url: heroImageUrl, layout_type: layoutType
+      email_assunto: assunto, email_corpo: corpo,
+      bg_color: bgColor, button_color: btnColor, hero_image_url: heroImageUrl, layout_type: layoutType,
+      thank_you_type: thankYouType,
+      redirect_url: thankYouType === 'external' ? redirectUrl : '', // Salva apenas se for externo
+      thank_you_title: thankYouTitle,
+      thank_you_text: thankYouText,
+      thank_you_whatsapp: thankYouWhatsapp,
+      thank_you_btn_link: thankYouBtnLink,
+      thank_you_btn_text: thankYouBtnText
     }
 
     let error;
@@ -162,21 +169,17 @@ export default function PaginasBuilderPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-12">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900">Construtor de Páginas</h2>
-          <p className="text-slate-600 mt-1">Crie landing pages de alta conversão.</p>
-        </div>
+      <div>
+        <h2 className="text-3xl font-black text-slate-900">Construtor de Páginas</h2>
+        <p className="text-slate-600 mt-1">Crie landing pages de alta conversão.</p>
       </div>
 
-      {/* TEMPLATES PRONTOS */}
       {!editandoId && (
         <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-2xl">
           <h3 className="text-indigo-900 font-bold mb-3 flex items-center gap-2"><LayoutTemplate className="size-5" /> Comece com um Template Profissional</h3>
           <div className="flex gap-3 flex-wrap">
             <button type="button" onClick={() => aplicarTemplate('ebook')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors shadow-sm">📚 E-book / Material</button>
             <button type="button" onClick={() => aplicarTemplate('webinar')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors shadow-sm">🎥 Webinar / Evento</button>
-            <button type="button" onClick={() => aplicarTemplate('consultoria')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors shadow-sm">💼 Consultoria / Contato</button>
           </div>
         </div>
       )}
@@ -189,29 +192,33 @@ export default function PaginasBuilderPage() {
           </div>
         )}
 
-        <form onSubmit={handleCriar} className={`space-y-6 ${editandoId ? 'mt-6' : ''}`}>
+        <form onSubmit={handleCriar} className={`space-y-8 ${editandoId ? 'mt-6' : ''}`}>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Título Principal</label>
-              <input type="text" required value={titulo} onChange={e => setTitulo(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Link (Slug)</label>
-              <div className="flex items-center">
-                <span className="p-3 bg-slate-100 border border-r-0 rounded-l-lg text-slate-500 font-bold">/</span>
-                <input type="text" required value={slug} onChange={e => setSlug(e.target.value)} className="w-full p-3 border rounded-r-lg focus:ring-2 focus:ring-blue-500" placeholder="ex: ebook-gratis" />
+          {/* SEÇÃO 1: DADOS DA PÁGINA DE CAPTURA */}
+          <div className="space-y-4">
+            <h4 className="font-bold text-lg text-slate-800 border-b pb-2">1. Configurações da Captura</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Título Principal</label>
+                <input type="text" required value={titulo} onChange={e => setTitulo(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Link (Slug)</label>
+                <div className="flex items-center">
+                  <span className="p-3 bg-slate-100 border border-r-0 rounded-l-lg text-slate-500 font-bold">/</span>
+                  <input type="text" required value={slug} onChange={e => setSlug(e.target.value)} className="w-full p-3 border rounded-r-lg focus:ring-2 focus:ring-blue-500" placeholder="ex: ebook-gratis" />
+                </div>
               </div>
             </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Subtítulo (Chamada para ação)</label>
+              <input type="text" required value={subtitulo} onChange={e => setSubtitulo(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Subtítulo (Chamada para ação)</label>
-            <input type="text" required value={subtitulo} onChange={e => setSubtitulo(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-4">
-            <h4 className="font-bold text-slate-800 flex items-center gap-2"><ImageIcon className="size-4"/> Design Visual</h4>
+          {/* SEÇÃO 2: DESIGN */}
+          <div className="space-y-4">
+            <h4 className="font-bold text-lg text-slate-800 border-b pb-2">2. Design Visual</h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Cor de Fundo</label>
@@ -241,7 +248,9 @@ export default function PaginasBuilderPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* SEÇÃO 3: E-MAIL E LISTA */}
+          <div className="space-y-4">
+            <h4 className="font-bold text-lg text-slate-800 border-b pb-2">3. E-mail e Integração</h4>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Integrar com qual lista?</label>
               <select required value={listaId} onChange={e => setListaId(e.target.value)} className="w-full p-3 border rounded-lg bg-white">
@@ -250,39 +259,73 @@ export default function PaginasBuilderPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Link de Obrigado (Redirect)</label>
-              <input type="url" required value={redirectUrl} onChange={e => setRedirectUrl(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="https://seusite.com/obrigado" />
+              <label className="block text-sm font-bold text-slate-700 mb-1">Assunto do E-mail Automático</label>
+              <input type="text" required value={assunto} onChange={e => setAssunto(e.target.value)} className="w-full p-3 border rounded-lg" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Corpo do E-mail <span className="text-slate-400 font-normal">(Use &#123;&#123;nome&#125;&#125; para personalizar)</span></label>
+              <div className="bg-white rounded-xl border border-slate-200 overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[150px] [&_.ql-editor]:!text-black">
+                <ReactQuill theme="snow" value={corpo} onChange={setCorpo} modules={modulosEditor} />
+              </div>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Assunto do E-mail Automático</label>
-            <input type="text" required value={assunto} onChange={e => setAssunto(e.target.value)} className="w-full p-3 border rounded-lg" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Corpo do E-mail <span className="text-slate-400 font-normal">(Use &#123;&#123;nome&#125;&#125; para personalizar)</span></label>
+          {/* SEÇÃO 4: PÁGINA DE OBRIGADO */}
+          <div className="space-y-4 p-5 bg-blue-50 rounded-xl border border-blue-100">
+            <h4 className="font-bold text-lg text-blue-900 border-b border-blue-200 pb-2">4. Página de Obrigado (Após o Cadastro)</h4>
             
-            {/* CORREÇÃO DA COR DO TEXTO NO EDITOR AQUI */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-visible 
-              [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none 
-              [&_.ql-editor]:min-h-[200px] [&_.ql-editor]:!text-black [&_.ql-editor_p]:!text-black [&_.ql-editor_span]:!text-black
-              [&_.ql-editor.ql-blank::before]:!text-slate-400">
-              <ReactQuill theme="snow" value={corpo} onChange={setCorpo} modules={modulosEditor} placeholder="Escreva o e-mail que o lead vai receber..." />
+            <div className="flex gap-4 mb-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" checked={thankYouType === 'external'} onChange={() => setThankYouType('external')} className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-bold text-slate-700">Redirecionar para link externo</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" checked={thankYouType === 'internal'} onChange={() => setThankYouType('internal')} className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-bold text-slate-700">Usar Página Pronta do Sistema</span>
+              </label>
             </div>
+
+            {thankYouType === 'external' ? (
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Link de Obrigado Externo (URL)</label>
+                <input type="url" required={thankYouType === 'external'} value={redirectUrl} onChange={e => setRedirectUrl(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="https://seusite.com/obrigado" />
+              </div>
+            ) : (
+              <div className="space-y-4 bg-white p-4 rounded-lg border border-blue-200">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Título da Página</label>
+                  <input type="text" value={thankYouTitle} onChange={e => setThankYouTitle(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="Ex: Tudo Certo!" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Texto de Agradecimento</label>
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[120px] [&_.ql-editor]:!text-black">
+                    <ReactQuill theme="snow" value={thankYouText} onChange={setThankYouText} modules={modulosEditor} placeholder="Ex: Seu e-book já foi enviado para o seu e-mail. Se preferir, clique abaixo para baixar agora!" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Link do Botão (Download/Link)</label>
+                    <input type="url" value={thankYouBtnLink} onChange={e => setThankYouBtnLink(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="https://link-do-pdf.com" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Texto do Botão</label>
+                    <input type="text" value={thankYouBtnText} onChange={e => setThankYouBtnText(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="Baixar E-book Agora" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Número do WhatsApp (Opcional - para tirar dúvidas)</label>
+                  <input type="tel" value={thankYouWhatsapp} onChange={e => setThankYouWhatsapp(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="Ex: 61999999999" />
+                  <p className="text-xs text-slate-500 mt-1">Deixe em branco se não quiser o botão do WhatsApp.</p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-4">
             <button type="submit" disabled={salvando} className="bg-blue-600 text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors flex-1 md:flex-none">
-              {salvando ? <Loader2 className="size-5 animate-spin" /> : <Plus className="size-5" />} 
-              {editandoId ? 'Salvar Alterações' : 'Salvar e Publicar Página'}
+              {salvando ? <Loader2 className="size-5 animate-spin" /> : <CheckCircle2 className="size-5" />} 
+              {editandoId ? 'Salvar Alterações' : 'Salvar e Publicar'}
             </button>
-            
-            {editandoId && (
-              <button type="button" onClick={limparFormulario} className="bg-slate-200 text-slate-700 font-bold px-8 py-4 rounded-xl hover:bg-slate-300 transition-colors">
-                Cancelar
-              </button>
-            )}
           </div>
           {sucesso && <p className="text-emerald-600 font-bold text-sm bg-emerald-50 p-3 rounded-lg text-center">{sucesso}</p>}
         </form>

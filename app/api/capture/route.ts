@@ -17,7 +17,6 @@ export async function POST(request: Request) {
 
     const emailLimpo = email.toLowerCase().trim()
 
-    // 1. Busca a configuração da página
     const { data: pageConfig } = await supabase
       .from('landing_pages')
       .select('*')
@@ -26,7 +25,7 @@ export async function POST(request: Request) {
 
     if (!pageConfig) return NextResponse.json({ error: 'Página não encontrada.' }, { status: 404 })
 
-    // 2. Salva o contato (com WhatsApp)
+    // Salva o contato
     await supabase.from('contatos').upsert([{
       nome,
       email: emailLimpo,
@@ -35,7 +34,7 @@ export async function POST(request: Request) {
       status: 'ativo'
     }], { onConflict: 'email' })
 
-    // 3. Enfileira o e-mail customizado
+    // Enfileira o e-mail
     const mensagemFinal = pageConfig.email_corpo.replace(/\{\{nome\}\}/gi, nome)
     
     await supabase.from('email_queue').insert([{
@@ -47,8 +46,13 @@ export async function POST(request: Request) {
       status: 'pending'
     }])
 
-    // 4. Retorna a URL de obrigado
-    return NextResponse.json({ success: true, redirect: pageConfig.redirect_url })
+    // Define para onde redirecionar
+    let redirectUrlFinal = pageConfig.redirect_url
+    if (pageConfig.thank_you_type === 'internal') {
+      redirectUrlFinal = `/${slug}/obrigado`
+    }
+
+    return NextResponse.json({ success: true, redirect: redirectUrlFinal })
 
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
