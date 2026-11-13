@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
-import { Loader2, CheckCircle2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
@@ -30,6 +30,7 @@ export default function PublicCapturePage() {
     e.preventDefault()
     setEnviando(true)
     setErro('')
+    
     try {
       const res = await fetch('/api/capture', {
         method: 'POST',
@@ -42,15 +43,17 @@ export default function PublicCapturePage() {
         throw new Error(data.error || 'Erro desconhecido ao processar')
       }
 
+      // Se a API retornar um link de redirecionamento, força a saída da tela
       if (data.redirect) {
         window.location.href = data.redirect
       } else {
-        setErro('A API não retornou o link de redirecionamento.')
+        setErro('Cadastro feito, mas a página de destino não foi configurada.')
+        setEnviando(false)
       }
     } catch (err: any) {
       setErro(err.message)
+      setEnviando(false)
     }
-    setEnviando(false)
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-950"><Loader2 className="animate-spin text-white size-10" /></div>
