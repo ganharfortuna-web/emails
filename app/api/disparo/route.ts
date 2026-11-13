@@ -67,12 +67,28 @@ export async function POST(request: Request) {
       }, { status: 500 })
     }
 
-    // 5. Status da campanha
-    const novoStatus = campanha.scheduled_at ? 'Agendada' : 'Em Fila'
+    // 5. Atualiza o status da campanha
+    const novoStatus = campanha.scheduled_at ? 'Agendada' : 'Enviando...'
     await supabase.from('campanhas').update({ 
       status: novoStatus, 
       total_sent: fila.length 
     }).eq('id', campanha.id)
+
+    // 🔥 6. ACIONA O PROCESSAMENTO IMEDIATO EM SEGUNDO PLANO
+    // Se não estiver agendada para o futuro, dispara o envio usando a conta SMTP única configurada
+    if (!campanha.scheduled_at) {
+      const host = request.headers.get('host')
+      const protocol = host?.includes('localhost') ? 'http' : 'https'
+      
+      if (host) {
+        // Dispara a requisição sem travar a resposta para o usuário
+        fetch(`${protocol}://${host}/api/disparo/processar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ campanhaId: campanha.id }),
+        }).catch(err => console.error('Erro ao acionar processador automático:', err))
+      }
+    }
 
     return NextResponse.json({ success: true, total: fila.length, status: novoStatus })
   } catch (error: any) {
