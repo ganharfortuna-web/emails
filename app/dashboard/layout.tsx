@@ -14,7 +14,8 @@ import {
   Menu, 
   X,
   Loader2,
-  ShieldAlert
+  ShieldAlert,
+  LayoutTemplate
 } from 'lucide-react'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -65,6 +66,7 @@ export default function DashboardLayout({
     { nome: 'Visão Geral', rota: '/dashboard', icone: LayoutDashboard },
     { nome: 'Contatos', rota: '/dashboard/contatos', icone: Users },
     { nome: 'Listas', rota: '/dashboard/listas', icone: Mail },
+    { nome: 'Páginas de Captura', rota: '/dashboard/paginas', icone: LayoutTemplate }, // 👈 NOVO ITEM
     { nome: 'Automações', rota: '/dashboard/automacoes', icone: GitMerge },
     { nome: 'Bounces', rota: '/dashboard/bounces', icone: ShieldAlert },
     { nome: 'Configurações', rota: '/dashboard/configuracoes', icone: Settings },
