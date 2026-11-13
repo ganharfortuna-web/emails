@@ -74,21 +74,8 @@ export async function POST(request: Request) {
       total_sent: fila.length 
     }).eq('id', campanha.id)
 
-    // 🔥 6. ACIONA O PROCESSAMENTO IMEDIATO EM SEGUNDO PLANO
-    // Se não estiver agendada para o futuro, dispara o envio usando a conta SMTP única configurada
-    if (!campanha.scheduled_at) {
-      const host = request.headers.get('host')
-      const protocol = host?.includes('localhost') ? 'http' : 'https'
-      
-      if (host) {
-        // Dispara a requisição sem travar a resposta para o usuário
-        fetch(`${protocol}://${host}/api/disparo/processar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ campanhaId: campanha.id }),
-        }).catch(err => console.error('Erro ao acionar processador automático:', err))
-      }
-    }
+    // ⚠️ REMOVIDO o fetch solto no final. O frontend já está acionando o processamento 
+    // via botão "Disparar", e deixar o fetch aqui causava loop duplo.
 
     return NextResponse.json({ success: true, total: fila.length, status: novoStatus })
   } catch (error: any) {

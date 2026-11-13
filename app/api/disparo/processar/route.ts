@@ -6,7 +6,7 @@ import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
 
-// ✅ Lote fixo seguro para evitar timeout na Vercel
+// Lote seguro para não estourar o tempo da Vercel
 const BATCH_SIZE = 20
 
 export async function POST(request: Request) {
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   try {
     const { campanhaId } = await request.json().catch(() => ({}))
 
-    // 1. Se veio campanha específica, verifica se está pausada
+    // 1. Verifica se a campanha está pausada
     if (campanhaId) {
       const { data: camp } = await supabase
         .from('campanhas')
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       (suprimidos || []).map(s => (s.email || '').toLowerCase())
     )
 
-    // 4. Busca apenas UMA conta ativa (sem rotação)
+    // 4. Busca conta ativa e verifica limite
     const { data: contaUnica, error: contaError } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -65,25 +65,28 @@ export async function POST(request: Request) {
       )
     }
 
-    // Verifica se a conta única atingiu o limite diário
-    if ((contaUnica.sent_today || 0) >= (contaUnica.daily_limit || 50)) {
+    if ((contaUnica.sent_today || 0) >= (contaUnica.daily_limit || 450)) {
       return NextResponse.json(
         { error: 'Limite diário da conta atingido.', done: true, restantes: 0, enviados: 0 },
         { status: 200 }
       )
     }
 
-    // 5. Próximo lote — busca simples e direta (SEM filtro de next_retry_at)
+    // 5. Próximo lote (Buscamos 100 para garantir que sobrarão e-mails válidos)
     let query = supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
-      .limit(BATCH_SIZE)
+      .limit(100)
 
-    // ✅ Filtro da campanha aplicado imediatamente
     if (campanhaId) {
       query = query.eq('campaign_id', campanhaId)
+    }
+
+    // Filtra campanhas pausadas direto na query
+    if (idsPausados.length > 0) {
+      query = query.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
     }
 
     const { data: filaRaw, error: filaError } = await query
@@ -92,23 +95,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: filaError.message }, { status: 500 })
     }
 
-    // 6. Filtra pausadas + suprimidas
-    const fila = (filaRaw || [])
-      .filter(item => !idsPausados.includes(item.campaign_id))
-      .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
-      .slice(0, BATCH_SIZE)
+    // 6. Filtra suprimidos e LIMPA A FILA no banco
+    const fila: any[] = []
+    
+    for (const item of (filaRaw || [])) {
+      if (emailsSuprimidos.has((item.recipient_email || '').toLowerCase())) {
+        // Marca como falha para não travar a fila nas próximas rodadas
+        await supabase
+          .from('email_queue')
+          .update({ 
+            status: 'failed', 
+            error_log: 'Ignorado: E-mail na lista de descadastrados/suprimidos.' 
+          })
+          .eq('id', item.id)
+        continue
+      }
+      
+      fila.push(item)
+      if (fila.length >= BATCH_SIZE) break
+    }
 
+    // Se a fila ficou vazia mas ainda há e-mails pendentes no banco, NÃO finaliza a campanha prematuramente
     if (fila.length === 0) {
-      if (campanhaId && !idsPausados.includes(campanhaId)) {
+      let countQuery = supabase
+        .from('email_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending')
+      if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
+      if (idsPausados.length > 0) countQuery = countQuery.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
+
+      const { count: restantes } = await countQuery
+      const totalRestante = restantes || 0
+      const done = totalRestante === 0
+
+      if (done && campanhaId) {
         await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaId)
       }
-      return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: 0, done: true })
+
+      return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: totalRestante, done })
     }
 
     let enviados = 0
     const campaignIds = new Set<string | number>()
 
-    // Configura o transporter fixo com a única conta
     const transporter = nodemailer.createTransport({
       host: contaUnica.host || 'smtp.gmail.com',
       port: contaUnica.port || 587,
@@ -121,16 +150,13 @@ export async function POST(request: Request) {
     })
 
     for (const item of fila) {
-      // ===== PERSONALIZAÇÃO =====
       let corpoPersonalizado = item.body || ''
       corpoPersonalizado = corpoPersonalizado
         .replace(/\{\{email\}\}/gi, item.recipient_email || '')
         .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
 
-      // ===== FORMATAÇÃO PARA E-MAIL (inline CSS) =====
       corpoPersonalizado = prepararHtmlEmail(corpoPersonalizado)
 
-      // ===== REESCREVE LINKS + PIXEL + FOOTER =====
       let htmlFinal = corpoPersonalizado
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
@@ -164,19 +190,12 @@ export async function POST(request: Request) {
           subject: item.subject,
           html: htmlFinal,
           encoding: 'utf-8',
-          headers: {
-            'Content-Type': 'text/html; charset=UTF-8',
-          },
+          headers: { 'Content-Type': 'text/html; charset=UTF-8' },
         })
 
         await supabase
           .from('email_queue')
-          .update({
-            status: 'sent',
-            sent_at: new Date().toISOString(),
-            retry_count: 0,
-            smtp_account_id: contaUnica.id
-          })
+          .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0, smtp_account_id: contaUnica.id })
           .eq('id', item.id)
 
         await supabase
@@ -186,14 +205,11 @@ export async function POST(request: Request) {
 
         contaUnica.sent_today = (contaUnica.sent_today || 0) + 1
         enviados++
-
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
         const classificacao = classificarErro(err.message, err.response)
         const retryCount = (item.retry_count || 0) + 1
         const podeRetentar = classificacao.retryable && retryCount < 3
-
-        console.error(`Bounce ${classificacao.type} para ${item.recipient_email}:`, err.message)
 
         await supabase.from('bounce_log').insert([{
           email_queue_id: item.id,
@@ -228,18 +244,13 @@ export async function POST(request: Request) {
             .eq('id', item.id)
 
           if (classificacao.action === 'block_contact') {
-            await supabase
-              .from('contatos')
-              .update({
+            await supabase.from('contatos').update({
                 status: 'bounced',
                 last_bounce_at: new Date().toISOString(),
                 last_bounce_reason: err.message?.slice(0, 300),
-              })
-              .eq('email', (item.recipient_email || '').toLowerCase())
+              }).eq('email', (item.recipient_email || '').toLowerCase())
 
-            await supabase
-              .from('suppression_list')
-              .upsert([{
+            await supabase.from('suppression_list').upsert([{
                 email: (item.recipient_email || '').toLowerCase(),
                 reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce',
                 original_error: err.message?.slice(0, 300),
@@ -248,43 +259,34 @@ export async function POST(request: Request) {
 
           if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
             const { data: contato } = await supabase
-              .from('contatos')
-              .select('bounce_count')
-              .eq('email', (item.recipient_email || '').toLowerCase())
-              .single()
+              .from('contatos').select('bounce_count').eq('email', (item.recipient_email || '').toLowerCase()).single()
 
-            await supabase
-              .from('contatos')
-              .update({
+            await supabase.from('contatos').update({
                 bounce_count: (contato?.bounce_count || 0) + 1,
                 last_bounce_at: new Date().toISOString(),
-              })
-              .eq('email', (item.recipient_email || '').toLowerCase())
+              }).eq('email', (item.recipient_email || '').toLowerCase())
           }
 
           if (classificacao.action === 'disable_account') {
-            await supabase
-              .from('smtp_accounts')
-              .update({ is_active: false })
-              .eq('id', contaUnica.id)
-            console.error(`🚫 Conta ${contaUnica.email} desativada (auth error)`)
+            await supabase.from('smtp_accounts').update({ is_active: false }).eq('id', contaUnica.id)
           }
         }
       }
     }
 
-    // 7. Conta restantes — mesmo critério da busca (SEM filtro de data)
+    // 7. Conta restantes atuais
     let countQuery = supabase
       .from('email_queue')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending')
     if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
+    if (idsPausados.length > 0) countQuery = countQuery.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
 
     const { count: restantesRaw } = await countQuery
     const restantes = restantesRaw || 0
     const done = restantes === 0
 
-    // 8. Atualiza status das campanhas INDIVIDUALMENTE
+    // 8. Atualiza status das campanhas
     const campanhasParaAtualizar = new Set<string | number>(campaignIds)
     if (campanhaId) campanhasParaAtualizar.add(campanhaId)
 
@@ -303,9 +305,7 @@ export async function POST(request: Request) {
         .eq('id', cid)
     }
 
-    return NextResponse.json({
-      success: true, processed: fila.length, enviados, restantes, done,
-    })
+    return NextResponse.json({ success: true, processed: fila.length, enviados, restantes, done })
   } catch (error: any) {
     console.error('ERRO /api/disparo/processar:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
