@@ -247,11 +247,12 @@ export default function AutomacoesPage() {
       else if (tipoSegmento === 'clicadores') query = query.not('clicked_at', 'is', null)
       else if (tipoSegmento === 'nao_abriram') query = query.eq('status', 'sent').is('opened_at', null)
 
-      const { data: itens } = await query
+      const { data: itens, error: errorQuery } = await query
+      if (errorQuery) throw new Error('Erro ao buscar e-mails: ' + errorQuery.message)
       if (!itens || itens.length === 0) { alert('Nenhum contato encontrado.'); setCriandoLista(false); return }
 
-      const { data: novaLista } = await supabase.from('listas').insert([{ nome: nomeNovaLista.trim() }]).select().single()
-      if (!novaLista) { setCriandoLista(false); return }
+      const { data: novaLista, error: errorLista } = await supabase.from('listas').insert([{ nome: nomeNovaLista.trim() }]).select().single()
+      if (errorLista || !novaLista) throw new Error('Erro ao criar lista: ' + (errorLista?.message || ''))
 
       const vistos = new Set<string>()
       const novosContatos = itens.filter(i => {
@@ -260,10 +261,14 @@ export default function AutomacoesPage() {
         vistos.add(email); return true
       }).map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: novaLista.id, status: 'ativo' }))
 
-      await supabase.from('contatos').insert(novosContatos)
-      setMsgSucesso(`✅ Lista criada com ${novosContatos.length} contatos!`)
+      // ✅ CORREÇÃO: MUDANÇA CRÍTICA DE INSERT PARA UPSERT
+      // Agora ele atualiza o contato se o e-mail já existir no banco, mudando-o para a nova lista.
+      const { error: errorInsert } = await supabase.from('contatos').upsert(novosContatos, { onConflict: 'email' })
+      if (errorInsert) throw new Error('Erro ao salvar contatos: ' + errorInsert.message)
+
+      setMsgSucesso(`✅ Lista "${nomeNovaLista.trim()}" criada com ${novosContatos.length} contatos!`)
       setNomeNovaLista(''); buscarListas()
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { alert(e.message) }
     setCriandoLista(false)
   }
 
@@ -418,7 +423,6 @@ export default function AutomacoesPage() {
                 <div className="border-t pt-4">
                   <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
                   
-                  {/* ✅ AQUI ESTÃO AS QUANTIDADES DE VOLTA */}
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}>
                       <Eye className="size-4 mb-1 text-emerald-600"/>
