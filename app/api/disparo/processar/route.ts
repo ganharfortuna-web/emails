@@ -12,7 +12,8 @@ const BATCH_SIZE = 7
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
+  let baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
+  if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1)
 
   if (!supabaseUrl || !supabaseKey) {
     return NextResponse.json({ error: 'Env vars faltando' }, { status: 500 })
@@ -23,104 +24,49 @@ export async function POST(request: Request) {
   try {
     const { campanhaId } = await request.json().catch(() => ({}))
 
-    // 1. Verifica se a campanha está pausada
     if (campanhaId) {
-      const { data: camp } = await supabase
-        .from('campanhas')
-        .select('status')
-        .eq('id', campanhaId)
-        .single()
-
+      const { data: camp } = await supabase.from('campanhas').select('status').eq('id', campanhaId).single()
       if (camp?.status === 'Pausada') {
-        return NextResponse.json({
-          success: true, processed: 0, enviados: 0, restantes: 0, done: false, pausada: true,
-        })
+        return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: 0, done: false, pausada: true })
       }
     }
 
-    // 2. Campanhas pausadas
-    const { data: pausadas } = await supabase
-      .from('campanhas').select('id').eq('status', 'Pausada')
+    const { data: pausadas } = await supabase.from('campanhas').select('id').eq('status', 'Pausada')
     const idsPausados = (pausadas || []).map((c: any) => c.id)
 
-    // 3. Emails suprimidos
-    const { data: suprimidos } = await supabase
-      .from('suppression_list').select('email')
-    const emailsSuprimidos = new Set(
-      (suprimidos || []).map(s => (s.email || '').toLowerCase())
-    )
+    const { data: suprimidos } = await supabase.from('suppression_list').select('email')
+    const emailsSuprimidos = new Set((suprimidos || []).map((s: any) => (s.email || '').toLowerCase()))
 
-    // 4. Busca conta ativa e verifica limite
     const { data: contaUnica, error: contaError } = await supabase
-      .from('smtp_accounts')
-      .select('*')
-      .eq('is_active', true)
-      .limit(1)
-      .single()
+      .from('smtp_accounts').select('*').eq('is_active', true).limit(1).single()
 
     if (contaError || !contaUnica) {
-      return NextResponse.json(
-        { error: 'Nenhuma conta de envio ativa encontrada no sistema.', done: true, restantes: 0, enviados: 0 },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Nenhuma conta ativa.', done: true, restantes: 0, enviados: 0 }, { status: 400 })
     }
 
     if ((contaUnica.sent_today || 0) >= (contaUnica.daily_limit || 450)) {
-      return NextResponse.json(
-        { error: 'Limite diário da conta atingido.', done: true, restantes: 0, enviados: 0 },
-        { status: 200 }
-      )
+      return NextResponse.json({ error: 'Limite diário atingido.', done: true, restantes: 0, enviados: 0 }, { status: 200 })
     }
 
-    // 5. Próximo lote (Buscamos 100 para garantir que sobrarão e-mails válidos)
-    let query = supabase
-      .from('email_queue')
-      .select('*')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(100)
-
-    if (campanhaId) {
-      query = query.eq('campaign_id', campanhaId)
-    }
-
-    // Filtra campanhas pausadas direto na query
-    if (idsPausados.length > 0) {
-      query = query.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
-    }
+    let query = supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100)
+    if (campanhaId) query = query.eq('campaign_id', campanhaId)
+    if (idsPausados.length > 0) query = query.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
 
     const { data: filaRaw, error: filaError } = await query
+    if (filaError) return NextResponse.json({ error: filaError.message }, { status: 500 })
 
-    if (filaError) {
-      return NextResponse.json({ error: filaError.message }, { status: 500 })
-    }
-
-    // 6. Filtra suprimidos e LIMPA A FILA no banco
     const fila: any[] = []
-    
     for (const item of (filaRaw || [])) {
       if (emailsSuprimidos.has((item.recipient_email || '').toLowerCase())) {
-        // Marca como falha para não travar a fila nas próximas rodadas
-        await supabase
-          .from('email_queue')
-          .update({ 
-            status: 'failed', 
-            error_log: 'Ignorado: E-mail na lista de descadastrados/suprimidos.' 
-          })
-          .eq('id', item.id)
+        await supabase.from('email_queue').update({ status: 'failed', error_log: 'Ignorado: Suprimido.' }).eq('id', item.id)
         continue
       }
-      
       fila.push(item)
       if (fila.length >= BATCH_SIZE) break
     }
 
-    // Se a fila ficou vazia mas ainda há e-mails pendentes no banco, NÃO finaliza a campanha prematuramente
     if (fila.length === 0) {
-      let countQuery = supabase
-        .from('email_queue')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending')
+      let countQuery = supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('status', 'pending')
       if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
       if (idsPausados.length > 0) countQuery = countQuery.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
 
@@ -131,7 +77,6 @@ export async function POST(request: Request) {
       if (done && campanhaId) {
         await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaId)
       }
-
       return NextResponse.json({ success: true, processed: 0, enviados: 0, restantes: totalRestante, done })
     }
 
@@ -144,9 +89,7 @@ export async function POST(request: Request) {
       secure: contaUnica.port === 465,
       auth: { user: contaUnica.email, pass: contaUnica.app_password },
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000,
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
     })
 
     for (const item of fila) {
@@ -159,9 +102,10 @@ export async function POST(request: Request) {
 
       let htmlFinal = corpoPersonalizado
       if (baseUrl) {
+        // ✅ AQUI ESTÁ A CORREÇÃO DO TYPESCRIPT: os parâmetros agora são :string
         htmlFinal = htmlFinal.replace(
-          /href="(https?:\/\/[^"]+)"/g,
-          (_m: string, url: string) =>
+          /href=(["'])(https?:\/\/[^"']+)\1/gi, 
+          (_m: string, quote: string, url: string) =>
             `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`
         )
 
@@ -182,26 +126,13 @@ export async function POST(request: Request) {
 
       try {
         await transporter.sendMail({
-          from: {
-            name: (contaUnica.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''),
-            address: contaUnica.sender_email || contaUnica.email,
-          },
-          to: item.recipient_email,
-          subject: item.subject,
-          html: htmlFinal,
-          encoding: 'utf-8',
+          from: { name: (contaUnica.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''), address: contaUnica.sender_email || contaUnica.email },
+          to: item.recipient_email, subject: item.subject, html: htmlFinal, encoding: 'utf-8',
           headers: { 'Content-Type': 'text/html; charset=UTF-8' },
         })
 
-        await supabase
-          .from('email_queue')
-          .update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0, smtp_account_id: contaUnica.id })
-          .eq('id', item.id)
-
-        await supabase
-          .from('smtp_accounts')
-          .update({ sent_today: (contaUnica.sent_today || 0) + 1 })
-          .eq('id', contaUnica.id)
+        await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0, smtp_account_id: contaUnica.id }).eq('id', item.id)
+        await supabase.from('smtp_accounts').update({ sent_today: (contaUnica.sent_today || 0) + 1 }).eq('id', contaUnica.id)
 
         contaUnica.sent_today = (contaUnica.sent_today || 0) + 1
         enviados++
@@ -212,61 +143,28 @@ export async function POST(request: Request) {
         const podeRetentar = classificacao.retryable && retryCount < 3
 
         await supabase.from('bounce_log').insert([{
-          email_queue_id: item.id,
-          campaign_id: item.campaign_id,
-          recipient_email: item.recipient_email,
-          bounce_type: classificacao.type,
-          error_code: classificacao.code,
-          error_message: err.message?.slice(0, 500),
-          smtp_account_id: contaUnica.id,
+          email_queue_id: item.id, campaign_id: item.campaign_id, recipient_email: item.recipient_email,
+          bounce_type: classificacao.type, error_code: classificacao.code, error_message: err.message?.slice(0, 500), smtp_account_id: contaUnica.id,
         }])
 
         if (podeRetentar) {
-          await supabase
-            .from('email_queue')
-            .update({
-              status: 'pending',
-              error_log: err.message?.slice(0, 500),
-              bounce_type: classificacao.type,
-              retry_count: retryCount,
-              next_retry_at: calcularProximaTentativa(retryCount).toISOString(),
-            })
-            .eq('id', item.id)
+          await supabase.from('email_queue').update({
+              status: 'pending', error_log: err.message?.slice(0, 500), bounce_type: classificacao.type,
+              retry_count: retryCount, next_retry_at: calcularProximaTentativa(retryCount).toISOString(),
+            }).eq('id', item.id)
         } else {
-          await supabase
-            .from('email_queue')
-            .update({
-              status: 'failed',
-              error_log: err.message?.slice(0, 500),
-              bounce_type: classificacao.type,
-              retry_count: retryCount,
-            })
-            .eq('id', item.id)
+          await supabase.from('email_queue').update({
+              status: 'failed', error_log: err.message?.slice(0, 500), bounce_type: classificacao.type, retry_count: retryCount,
+            }).eq('id', item.id)
 
           if (classificacao.action === 'block_contact') {
-            await supabase.from('contatos').update({
-                status: 'bounced',
-                last_bounce_at: new Date().toISOString(),
-                last_bounce_reason: err.message?.slice(0, 300),
-              }).eq('email', (item.recipient_email || '').toLowerCase())
-
-            await supabase.from('suppression_list').upsert([{
-                email: (item.recipient_email || '').toLowerCase(),
-                reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce',
-                original_error: err.message?.slice(0, 300),
-              }], { onConflict: 'email' })
+            await supabase.from('contatos').update({ status: 'bounced', last_bounce_at: new Date().toISOString(), last_bounce_reason: err.message?.slice(0, 300) }).eq('email', (item.recipient_email || '').toLowerCase())
+            await supabase.from('suppression_list').upsert([{ email: (item.recipient_email || '').toLowerCase(), reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce', original_error: err.message?.slice(0, 300) }], { onConflict: 'email' })
           }
-
           if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
-            const { data: contato } = await supabase
-              .from('contatos').select('bounce_count').eq('email', (item.recipient_email || '').toLowerCase()).single()
-
-            await supabase.from('contatos').update({
-                bounce_count: (contato?.bounce_count || 0) + 1,
-                last_bounce_at: new Date().toISOString(),
-              }).eq('email', (item.recipient_email || '').toLowerCase())
+            const { data: contato } = await supabase.from('contatos').select('bounce_count').eq('email', (item.recipient_email || '').toLowerCase()).single()
+            await supabase.from('contatos').update({ bounce_count: (contato?.bounce_count || 0) + 1, last_bounce_at: new Date().toISOString() }).eq('email', (item.recipient_email || '').toLowerCase())
           }
-
           if (classificacao.action === 'disable_account') {
             await supabase.from('smtp_accounts').update({ is_active: false }).eq('id', contaUnica.id)
           }
@@ -274,11 +172,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 7. Conta restantes atuais
-    let countQuery = supabase
-      .from('email_queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending')
+    let countQuery = supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('status', 'pending')
     if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
     if (idsPausados.length > 0) countQuery = countQuery.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
 
@@ -286,23 +180,13 @@ export async function POST(request: Request) {
     const restantes = restantesRaw || 0
     const done = restantes === 0
 
-    // 8. Atualiza status das campanhas
     const campanhasParaAtualizar = new Set<string | number>(campaignIds)
     if (campanhaId) campanhasParaAtualizar.add(campanhaId)
 
     for (const cid of campanhasParaAtualizar) {
       if (idsPausados.includes(cid)) continue
-
-      const { count: pendentesDaCampanha } = await supabase
-        .from('email_queue')
-        .select('*', { count: 'exact', head: true })
-        .eq('campaign_id', cid)
-        .eq('status', 'pending')
-
-      await supabase
-        .from('campanhas')
-        .update({ status: (pendentesDaCampanha || 0) === 0 ? 'Enviada' : 'Enviando...' })
-        .eq('id', cid)
+      const { count: pendentesDaCampanha } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', cid).eq('status', 'pending')
+      await supabase.from('campanhas').update({ status: (pendentesDaCampanha || 0) === 0 ? 'Enviada' : 'Enviando...' }).eq('id', cid)
     }
 
     return NextResponse.json({ success: true, processed: fila.length, enviados, restantes, done })

@@ -8,23 +8,29 @@ export async function GET(request: Request) {
   const id = searchParams.get('id')
   const url = searchParams.get('url')
 
+  // Se não tiver a URL de destino, joga para a home
+  if (!url) {
+    return NextResponse.redirect(process.env.NEXT_PUBLIC_APP_URL || 'https://google.com')
+  }
+
+  // Atualiza o banco de dados (sem travar o carregamento da página)
   if (id) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
+    
     if (supabaseUrl && supabaseKey) {
       const supabase = createClient(supabaseUrl, supabaseKey)
-
-      // Marca como clicado
-      await supabase
+      // Dispara a atualização e não espera o retorno para redirecionar mais rápido
+      supabase
         .from('email_queue')
         .update({ clicked_at: new Date().toISOString() })
         .eq('id', id)
-        .is('clicked_at', null)
+        .then(({ error }) => {
+          if (error) console.error('Erro ao registrar clique:', error)
+        })
     }
   }
 
-  // Redireciona para o link original (ou fallback)
-  const destino = url || process.env.NEXT_PUBLIC_APP_URL || 'https://google.com'
-  return NextResponse.redirect(destino)
+  // Redireciona a pessoa imediatamente para o link original
+  return NextResponse.redirect(url, 302)
 }
