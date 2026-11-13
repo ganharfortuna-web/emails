@@ -25,64 +25,74 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Campanha não encontrada', detalhe: campanhaError?.message }, { status: 404 })
     }
 
-    // 2. Busca contatos da lista, ignorando descadastrados
-    const { data: contatos, error: contatosError } = await supabase
-      .from('contatos')
-      .select('id, email, nome, status')
-      .eq('lista_id', campanha.lista_id)
-      .neq('status', 'descadastrado')
+    // 2. Busca contatos da lista COM PAGINAÇÃO (para pegar mais de 1000)
+    let todosContatos: any[] = []
+    let page = 0
+    const pageSize = 1000
+    let hasMore = true
 
-    if (contatosError) {
-      return NextResponse.json({ error: 'Erro ao buscar contatos', detalhe: contatosError.message }, { status: 500 })
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('contatos')
+        .select('id, email, nome, status')
+        .eq('lista_id', campanha.lista_id)
+        .neq('status', 'descadastrado')
+        .range(page * pageSize, (page + 1) * pageSize - 1)
+
+      if (error) throw new Error('Erro ao buscar contatos: ' + error.message)
+      
+      if (data && data.length > 0) {
+        todosContatos = [...todosContatos, ...data]
+        if (data.length < pageSize) {
+          hasMore = false
+        } else {
+          page++
+        }
+      } else {
+        hasMore = false
+      }
     }
-    if (!contatos || contatos.length === 0) {
+
+    if (todosContatos.length === 0) {
       return NextResponse.json({ error: 'Nenhum contato ativo na lista (ou todos descadastrados)' }, { status: 400 })
     }
 
-    // 3. Monta a fila
-    const fila = contatos
-      .filter(c => c.email && c.email.includes('@'))
-      .map(contato => ({
-        campaign_id: campanha.id,
-        recipient_email: contato.email,
-        recipient_name: contato.nome || '',
-        subject: campanha.assunto,
-        body: campanha.mensagem,
-        status: 'pending',
-      }))
+    // 3. Remove duplicatas de e-mail (caso o banco tenha)
+    const vistos = new Set<string>()
+    const contatosUnicos = todosContatos.filter(c => {
+      const emailLimpo = c.email?.toLowerCase().trim()
+      if (!emailLimpo || !emailLimpo.includes('@') || vistos.has(emailLimpo)) return false
+      vistos.add(emailLimpo)
+      return true
+    })
 
-    if (fila.length === 0) {
-      return NextResponse.json({ error: 'Nenhum e-mail válido na lista' }, { status: 400 })
+    // 4. Monta a fila
+    const fila = contatosUnicos.map(contato => ({
+      campaign_id: campanha.id,
+      recipient_email: contato.email.toLowerCase().trim(),
+      recipient_name: contato.nome || '',
+      subject: campanha.assunto,
+      body: campanha.mensagem,
+      status: 'pending',
+    }))
+
+    // 5. Insere na fila (em blocos de 500 para não estourar o limite do Supabase)
+    for (let i = 0; i < fila.length; i += 500) {
+      const bloco = fila.slice(i, i + 500)
+      const { error: insertError } = await supabase.from('email_queue').insert(bloco)
+      if (insertError) throw new Error('Erro ao inserir na fila: ' + insertError.message)
     }
 
-    // 4. Insere na fila
-    const { error: insertError } = await supabase.from('email_queue').insert(fila)
-
-    if (insertError) {
-      return NextResponse.json({ 
-        error: 'Erro ao inserir na fila', 
-        detalhe: insertError.message,
-        hint: insertError.hint,
-        code: insertError.code,
-      }, { status: 500 })
-    }
-
-    // 5. Atualiza o status da campanha
+    // 6. Atualiza o status da campanha
     const novoStatus = campanha.scheduled_at ? 'Agendada' : 'Enviando...'
     await supabase.from('campanhas').update({ 
       status: novoStatus, 
       total_sent: fila.length 
     }).eq('id', campanha.id)
 
-    // ⚠️ REMOVIDO o fetch solto no final. O frontend já está acionando o processamento 
-    // via botão "Disparar", e deixar o fetch aqui causava loop duplo.
-
     return NextResponse.json({ success: true, total: fila.length, status: novoStatus })
   } catch (error: any) {
     console.error('ERRO /api/disparo:', error)
-    return NextResponse.json({ 
-      error: error.message,
-      stack: error.stack?.split('\n').slice(0,3).join(' | ')
-    }, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
