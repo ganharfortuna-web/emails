@@ -3,11 +3,11 @@ import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 import { prepararHtmlEmail } from '@/lib/email-html'
-import { getBatchSize } from '@/lib/config'
 
 export const dynamic = 'force-dynamic'
 
-const BATCH_SIZE = getBatchSize() || 20 // Garante um lote seguro por requisição (ex: 20 em 20)
+// ✅ Lote fixo seguro para evitar timeout na Vercel
+const BATCH_SIZE = 20
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       (suprimidos || []).map(s => (s.email || '').toLowerCase())
     )
 
-    // 4. Busca apenas UMA conta ativa
+    // 4. Busca apenas UMA conta ativa (sem rotação)
     const { data: contaUnica, error: contaError } = await supabase
       .from('smtp_accounts')
       .select('*')
@@ -73,17 +73,18 @@ export async function POST(request: Request) {
       )
     }
 
-    // 5. Próximo lote (respeitando next_retry_at)
-    const agora = new Date().toISOString()
+    // 5. Próximo lote — busca simples e direta (SEM filtro de next_retry_at)
     let query = supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
-      .or(`next_retry_at.is.null,next_retry_at.lte.${agora}`)
       .order('created_at', { ascending: true })
       .limit(BATCH_SIZE)
 
-    if (campanhaId) query = query.eq('campaign_id', campanhaId)
+    // ✅ Filtro da campanha aplicado imediatamente
+    if (campanhaId) {
+      query = query.eq('campaign_id', campanhaId)
+    }
 
     const { data: filaRaw, error: filaError } = await query
 
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
     const fila = (filaRaw || [])
       .filter(item => !idsPausados.includes(item.campaign_id))
       .filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase()))
+      .slice(0, BATCH_SIZE)
 
     if (fila.length === 0) {
       if (campanhaId && !idsPausados.includes(campanhaId)) {
@@ -113,20 +115,22 @@ export async function POST(request: Request) {
       secure: contaUnica.port === 465,
       auth: { user: contaUnica.email, pass: contaUnica.app_password },
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     })
 
-    // Processa os e-mails do lote atual
     for (const item of fila) {
+      // ===== PERSONALIZAÇÃO =====
       let corpoPersonalizado = item.body || ''
       corpoPersonalizado = corpoPersonalizado
         .replace(/\{\{email\}\}/gi, item.recipient_email || '')
         .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
 
+      // ===== FORMATAÇÃO PARA E-MAIL (inline CSS) =====
       corpoPersonalizado = prepararHtmlEmail(corpoPersonalizado)
 
+      // ===== REESCREVE LINKS + PIXEL + FOOTER =====
       let htmlFinal = corpoPersonalizado
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(
@@ -167,15 +171,22 @@ export async function POST(request: Request) {
 
         await supabase
           .from('email_queue')
-          .update({ 
-            status: 'sent', 
-            sent_at: new Date().toISOString(), 
+          .update({
+            status: 'sent',
+            sent_at: new Date().toISOString(),
             retry_count: 0,
-            smtp_account_id: contaUnica.id 
+            smtp_account_id: contaUnica.id
           })
           .eq('id', item.id)
 
+        await supabase
+          .from('smtp_accounts')
+          .update({ sent_today: (contaUnica.sent_today || 0) + 1 })
+          .eq('id', contaUnica.id)
+
+        contaUnica.sent_today = (contaUnica.sent_today || 0) + 1
         enviados++
+
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
         const classificacao = classificarErro(err.message, err.response)
@@ -215,32 +226,65 @@ export async function POST(request: Request) {
               retry_count: retryCount,
             })
             .eq('id', item.id)
+
+          if (classificacao.action === 'block_contact') {
+            await supabase
+              .from('contatos')
+              .update({
+                status: 'bounced',
+                last_bounce_at: new Date().toISOString(),
+                last_bounce_reason: err.message?.slice(0, 300),
+              })
+              .eq('email', (item.recipient_email || '').toLowerCase())
+
+            await supabase
+              .from('suppression_list')
+              .upsert([{
+                email: (item.recipient_email || '').toLowerCase(),
+                reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce',
+                original_error: err.message?.slice(0, 300),
+              }], { onConflict: 'email' })
+          }
+
+          if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
+            const { data: contato } = await supabase
+              .from('contatos')
+              .select('bounce_count')
+              .eq('email', (item.recipient_email || '').toLowerCase())
+              .single()
+
+            await supabase
+              .from('contatos')
+              .update({
+                bounce_count: (contato?.bounce_count || 0) + 1,
+                last_bounce_at: new Date().toISOString(),
+              })
+              .eq('email', (item.recipient_email || '').toLowerCase())
+          }
+
+          if (classificacao.action === 'disable_account') {
+            await supabase
+              .from('smtp_accounts')
+              .update({ is_active: false })
+              .eq('id', contaUnica.id)
+            console.error(`🚫 Conta ${contaUnica.email} desativada (auth error)`)
+          }
         }
       }
     }
 
-    // Atualiza o contador diário da conta SMTP em uma única operação otimizada
-    if (enviados > 0) {
-      await supabase
-        .from('smtp_accounts')
-        .update({ sent_today: (contaUnica.sent_today || 0) + enviados })
-        .eq('id', contaUnica.id)
-    }
-
-    // 7. Conta restantes
-    const agoraContagem = new Date().toISOString()
+    // 7. Conta restantes — mesmo critério da busca (SEM filtro de data)
     let countQuery = supabase
       .from('email_queue')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending')
-      .or(`next_retry_at.is.null,next_retry_at.lte.${agoraContagem}`)
     if (campanhaId) countQuery = countQuery.eq('campaign_id', campanhaId)
 
     const { count: restantesRaw } = await countQuery
     const restantes = restantesRaw || 0
     const done = restantes === 0
 
-    // 8. Atualiza status das campanhas
+    // 8. Atualiza status das campanhas INDIVIDUALMENTE
     const campanhasParaAtualizar = new Set<string | number>(campaignIds)
     if (campanhaId) campanhasParaAtualizar.add(campanhaId)
 
