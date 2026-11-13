@@ -29,7 +29,7 @@ export default function ContatosPage() {
 
   const carregarContatos = async () => {
     setCarregando(true)
-    let query = supabase.from('contatos').select('*, listas(nome)').order('created_at', { ascending: false })
+    let query = supabase.from('contatos').select('*, listas(nome)').order('created_at', { ascending: false }).limit(100)
 
     if (filtroLista) query = query.eq('lista_id', filtroLista)
     if (busca) query = query.ilike('email', `%${busca}%`)
@@ -54,33 +54,54 @@ export default function ContatosPage() {
     return `https://wa.me/${numLimpo}`
   }
 
-  // ✅ FUNÇÃO PARA BAIXAR O CSV
+  // ✅ FUNÇÃO CORRIGIDA COM PAGINAÇÃO PARA BAIXAR TODOS
   const baixarCSV = async () => {
     setExportando(true)
     try {
-      // 1. Busca apenas os contatos ATIVOS (ignora bounces e descadastrados)
-      let query = supabase.from('contatos').select('*, listas(nome)').eq('status', 'ativo')
-      if (filtroLista) query = query.eq('lista_id', filtroLista)
-      
-      const { data, error } = await query
-      
-      if (error || !data) throw new Error('Erro ao buscar contatos')
+      let todosContatosExport: any[] = []
+      let page = 0
+      const pageSize = 1000
+      let hasMore = true
 
-      if (data.length === 0) {
+      // Loop para buscar de 1000 em 1000 até acabar
+      while (hasMore) {
+        let query = supabase.from('contatos')
+          .select('*, listas(nome)')
+          .eq('status', 'ativo')
+          .range(page * pageSize, (page + 1) * pageSize - 1)
+        
+        if (filtroLista) query = query.eq('lista_id', filtroLista)
+        
+        const { data, error } = await query
+        
+        if (error) throw new Error('Erro ao buscar contatos: ' + error.message)
+
+        if (data && data.length > 0) {
+          todosContatosExport = [...todosContatosExport, ...data]
+          if (data.length < pageSize) {
+            hasMore = false
+          } else {
+            page++
+          }
+        } else {
+          hasMore = false
+        }
+      }
+
+      if (todosContatosExport.length === 0) {
         alert('Nenhum contato ativo para exportar nesta lista.')
         setExportando(false)
         return
       }
 
-      // 2. Monta o CSV com BOM (\uFEFF) para o Excel ler acentos corretamente
+      // Monta o CSV com BOM (\uFEFF) para o Excel ler acentos
       const cabecalho = "Nome,Email,WhatsApp,Lista,Status\n"
-      const linhas = data.map(c => 
+      const linhas = todosContatosExport.map(c => 
         `"${c.nome || ''}","${c.email}","${c.whatsapp || ''}","${c.listas?.nome || ''}","${c.status}"`
       ).join("\n")
       
       const csvContent = "\uFEFF" + cabecalho + linhas
 
-      // 3. Cria o arquivo e força o download
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -104,18 +125,16 @@ export default function ContatosPage() {
           <p className="text-slate-600 mt-1">Gerencie a sua base de leads.</p>
         </div>
         
-        {/* ✅ BOTÃO DE EXPORTAR CSV */}
         <button 
           onClick={baixarCSV}
           disabled={exportando || carregando}
           className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50"
         >
           {exportando ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-          Baixar Contatos (CSV)
+          {exportando ? 'Gerando CSV...' : 'Baixar Contatos (CSV)'}
         </button>
       </div>
 
-      {/* BARRA DE BUSCA E FILTRO */}
       <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
@@ -142,7 +161,6 @@ export default function ContatosPage() {
         </div>
       </div>
 
-      {/* TABELA DE CONTATOS */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -234,7 +252,7 @@ export default function ContatosPage() {
         </div>
         
         <div className="bg-slate-50 border-t border-slate-200 px-6 py-3 flex items-center justify-between text-sm text-slate-500">
-          <span>Mostrando {contatos.length} contato(s)</span>
+          <span>Mostrando os {contatos.length} contatos mais recentes na tela (use o CSV para ver todos)</span>
         </div>
       </div>
     </div>
