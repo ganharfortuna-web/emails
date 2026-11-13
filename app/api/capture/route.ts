@@ -17,27 +17,35 @@ export async function POST(request: Request) {
 
     const emailLimpo = email.toLowerCase().trim()
 
-    const { data: pageConfig } = await supabase
+    // 1. Busca a página
+    const { data: pageConfig, error: errPage } = await supabase
       .from('landing_pages')
       .select('*')
       .eq('slug', slug)
       .single()
 
-    if (!pageConfig) return NextResponse.json({ error: 'Página não encontrada.' }, { status: 404 })
+    if (errPage || !pageConfig) {
+      return NextResponse.json({ error: 'Página não encontrada no banco de dados.' }, { status: 404 })
+    }
 
-    // Salva o contato
-    await supabase.from('contatos').upsert([{
-      nome,
+    // 2. Salva o contato e checa se deu erro
+    const { error: errContato } = await supabase.from('contatos').upsert([{
+      nome: nome,
       email: emailLimpo,
-      whatsapp,
+      whatsapp: whatsapp,
       lista_id: pageConfig.lista_id,
       status: 'ativo'
     }], { onConflict: 'email' })
 
-    // Enfileira o e-mail
+    if (errContato) {
+      console.error('Erro ao salvar contato:', errContato)
+      return NextResponse.json({ error: 'Erro no banco (Contato): ' + errContato.message }, { status: 500 })
+    }
+
+    // 3. Enfileira o e-mail e checa se deu erro
     const mensagemFinal = pageConfig.email_corpo.replace(/\{\{nome\}\}/gi, nome)
     
-    await supabase.from('email_queue').insert([{
+    const { error: errFila } = await supabase.from('email_queue').insert([{
       campaign_id: null,
       recipient_email: emailLimpo,
       recipient_name: nome,
@@ -46,7 +54,12 @@ export async function POST(request: Request) {
       status: 'pending'
     }])
 
-    // Define para onde redirecionar
+    if (errFila) {
+      console.error('Erro ao enfileirar e-mail:', errFila)
+      return NextResponse.json({ error: 'Erro no banco (Fila de E-mail): ' + errFila.message }, { status: 500 })
+    }
+
+    // 4. Define o link final
     let redirectUrlFinal = pageConfig.redirect_url
     if (pageConfig.thank_you_type === 'internal') {
       redirectUrlFinal = `/${slug}/obrigado`
@@ -55,6 +68,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, redirect: redirectUrlFinal })
 
   } catch (error: any) {
+    console.error('Erro geral na API de captura:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
