@@ -69,6 +69,7 @@ export default function AutomacoesPage() {
   const [mensagem, setMensagem] = useState('')
   const [scheduledAt, setScheduledAt] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [disparandoEmLote, setDisparandoEmLote] = useState<string | null>(null)
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [modalReenvio, setModalReenvio] = useState<any>(null)
@@ -149,18 +150,45 @@ export default function AutomacoesPage() {
     setStats(agrupado)
   }
 
-  const dispararUmLote = async (campanhaId: string | number) => {
-    try {
-      const r = await fetch('/api/disparo/processar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campanhaId }),
-      })
-      return await r.json()
-    } catch (err) {
-      console.error('Erro no lote:', err)
-      return null
+  // --- LOOP AUTOMÁTICO SEGURO RESPEITANDO LIMITES DA VERCEL / SUPABASE ---
+  const dispararLotesEmSequencia = async (campanhaId: string | number) => {
+    setDisparandoEmLote(String(campanhaId))
+    let continuar = true
+    let totalEnviadosNestaSessao = 0
+
+    while (continuar) {
+      try {
+        const res = await fetch('/api/disparo/processar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ campanhaId }),
+        })
+        const json = await res.json()
+
+        if (!res.ok) {
+          console.error('Erro ao processar lote:', json.error)
+          break
+        }
+
+        totalEnviadosNestaSessao += (json.enviados || 0)
+        await buscarCampanhas(true)
+        await carregarStats()
+
+        // Se o backend indicou 'done: true' ou não restou nenhum pendente, encerra o loop
+        if (json.done || json.restantes === 0 || (json.enviados === 0 && json.processed === 0)) {
+          continuar = false
+        } else {
+          // Pequena pausa de 500ms entre os lotes para aliviar o Supabase e evitar Rate Limit
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+      } catch (err) {
+        console.error('Falha de rede no disparo:', err)
+        break
+      }
     }
+
+    setDisparandoEmLote(null)
+    alert(`🎉 Processo concluído! Total enviado nesta sessão: ${totalEnviadosNestaSessao} e-mails.`)
   }
 
   const toggleSelecionada = (id: string) => {
@@ -187,7 +215,6 @@ export default function AutomacoesPage() {
     buscarCampanhas()
   }
 
-  // --- PAUSAR / RETOMAR CAMPANHA ---
   const alternarPausa = async (campanha: any) => {
     const novoStatus = campanha.status === 'Pausada' ? 'Em Fila' : 'Pausada'
     await supabase.from('campanhas').update({ status: novoStatus }).eq('id', campanha.id)
@@ -197,7 +224,6 @@ export default function AutomacoesPage() {
     }
   }
 
-  // --- REUTILIZAR CAMPANHA ---
   const reutilizarCampanha = (campanha: any) => {
     if (!confirm(`Carregar "${campanha.assunto}" no editor?\n\nVocê poderá editar e reenviar.`)) return
     setListaSelecionada(campanha.lista_id || '')
@@ -207,7 +233,6 @@ export default function AutomacoesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // --- CRIAR SEGMENTO A PARTIR DE CAMPANHA ---
   const criarSegmento = async () => {
     if (!modalDetalhes || !nomeNovaLista.trim()) {
       alert('Digite um nome para a nova lista.')
@@ -245,7 +270,7 @@ export default function AutomacoesPage() {
         .select().single()
 
       if (errLista || !novaLista) {
-        alert('Erro ao criar lista: ' + (errLista?.message || 'erro desconhecido'))
+        alert('Erro ao criar lista: ' + (errLista?.message || 'erro'))
         setCriandoLista(false)
         return
       }
@@ -283,7 +308,6 @@ export default function AutomacoesPage() {
     setCriandoLista(false)
   }
 
-  // --- REENVIAR PARA QUEM NÃO ABRIU ---
   const abrirModalReenvio = async (campanha: any) => {
     const { data } = await supabase
       .from('email_queue')
@@ -292,13 +316,13 @@ export default function AutomacoesPage() {
       .eq('status', 'sent')
 
     if (!data || data.length === 0) {
-      alert('⚠️ Esta campanha ainda não foi enviada. Nada para reenviar.')
+      alert('⚠️ Esta campanha ainda não foi enviada.')
       return
     }
 
     const naoAbriram = data.filter(d => !d.open_real_count || d.open_real_count === 0).length
     if (naoAbriram === 0) {
-      alert('🎉 Todos já abriram de verdade! Nada para reenviar.')
+      alert('🎉 Todos já abriram!')
       return
     }
 
@@ -351,11 +375,9 @@ export default function AutomacoesPage() {
     setNovoTitulo('')
     buscarCampanhas()
 
-    await dispararUmLote(nova.id)
-    alert(`✅ ${fila.length} e-mails de reenvio na fila!`)
+    dispararLotesEmSequencia(nova.id)
   }
 
-  // --- CRIAR CAMPANHA ---
   const prepararDisparo = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -399,8 +421,17 @@ export default function AutomacoesPage() {
       }
 
       if (!scheduledAt) {
-        await dispararUmLote(novaCampanha.id)
-        alert(`🎉 Campanha criada! Os e-mails serão enviados automaticamente em lotes.`)
+        alert(`🎉 Campanha enfileirada com sucesso! Iniciando disparos automáticos...`)
+        setEnviando(false)
+        setAssunto('')
+        setMensagem('')
+        setListaSelecionada('')
+        setScheduledAt('')
+        buscarCampanhas()
+
+        // Inicia o loop automático de envio em lotes seguros
+        dispararLotesEmSequencia(novaCampanha.id)
+        return
       } else {
         alert(`📅 Campanha agendada para ${new Date(scheduledAt).toLocaleString('pt-BR')}`)
       }
@@ -482,9 +513,9 @@ export default function AutomacoesPage() {
               <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
                 <div className="text-emerald-700 mt-0.5"><Zap className="size-5" /></div>
                 <div>
-                  <p className="font-bold text-emerald-900 text-sm">Envio automático em lotes</p>
+                  <p className="font-bold text-emerald-900 text-sm">Envio otimizado em lotes</p>
                   <p className="text-xs text-emerald-700 mt-1">
-                    Não precisa manter a aba aberta. O sistema processa em lotes a cada 5 minutos (via cron externo).
+                    O sistema processa os e-mails de forma segura e contínua respeitando os limites da Vercel e do Supabase.
                   </p>
                 </div>
               </div>
@@ -566,13 +597,17 @@ export default function AutomacoesPage() {
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
                   const st = stats[String(campanha.id)] || { ...STATS_VAZIO }
+                  const estaDisparandoEste = disparandoEmLote === String(campanha.id)
+
                   const corStatus = campanha.status === 'Pausada' ? 'bg-slate-200 text-slate-700'
                     : campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
                     : campanha.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700'
                     : campanha.status === 'Em Fila' ? 'bg-blue-100 text-blue-700'
                     : campanha.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700'
                     : 'bg-amber-100 text-amber-700'
+
                   const ctor = st.abertos > 0 ? Math.round((st.clicados / st.abertos) * 100) : 0
+
                   return (
                     <div key={campanha.id}
                       className={`p-4 rounded-xl border ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'} transition-colors`}>
@@ -626,12 +661,6 @@ export default function AutomacoesPage() {
                                   <Target className="size-3" /> CTOR {ctor}%
                                 </div>
                               )}
-
-                              {st.abertosBrutos > st.abertos && (
-                                <p className="text-[10px] text-slate-400 font-medium">
-                                  {st.abertosBrutos - st.abertos} hit(s) ignorado(s) (prefetch/MPP/bot)
-                                </p>
-                              )}
                             </div>
                           )}
 
@@ -657,15 +686,12 @@ export default function AutomacoesPage() {
                               </button>
                             )}
                             {st.pendentes > 0 && campanha.status !== 'Pausada' && (
-                              <button onClick={async () => {
-                                const j = await dispararUmLote(campanha.id)
-                                if (j) {
-                                  alert(`✅ ${j.enviados || 0} enviados, ${j.restantes || 0} restantes.`)
-                                  buscarCampanhas(true)
-                                }
-                              }}
-                                className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1">
-                                <Zap className="size-3" /> Disparar
+                              <button
+                                onClick={() => dispararLotesEmSequencia(campanha.id)}
+                                disabled={estaDisparandoEste}
+                                className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
+                                {estaDisparandoEste ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
+                                {estaDisparandoEste ? 'Enviando...' : 'Disparar'}
                               </button>
                             )}
                           </div>
@@ -676,279 +702,9 @@ export default function AutomacoesPage() {
                 })
               )}
             </div>
-
-            {campanhas.length > 0 && (
-              <button onClick={() => deletarCampanhas(campanhas.map(c => c.id))}
-                className="w-full mt-4 text-xs font-bold text-rose-600 hover:text-rose-700 flex items-center justify-center gap-1 py-2 border-t border-slate-100">
-                <Trash2 className="size-3" /> Apagar TODO o histórico
-              </button>
-            )}
-          </div>
-
-          <div className="bg-emerald-50 rounded-2xl border border-emerald-100 p-6">
-            <h3 className="font-bold text-emerald-900 text-sm flex items-center gap-2 mb-3">
-              <LayoutTemplate className="size-4" /> Como funciona
-            </h3>
-            <ul className="text-sm text-emerald-700 space-y-2 font-medium">
-              <li>• Aberturas filtram Apple MPP, bots e prefetch</li>
-              <li>• CTOR = cliques ÷ aberturas reais</li>
-              <li>• Pause e retome campanhas a qualquer momento</li>
-              <li>• Reutilize campanhas antigas para editar e reenviar</li>
-            </ul>
           </div>
         </div>
       </div>
-
-      {/* ============== MODAL DE DETALHES DA CAMPANHA ============== */}
-      {modalDetalhes && (() => {
-        const st = stats[String(modalDetalhes.id)] || { ...STATS_VAZIO }
-        const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
-        const ctor = st.abertos > 0 ? Math.round((st.clicados / st.abertos) * 100) : 0
-        const taxaAbertura = st.enviados > 0 ? Math.round((st.abertos / st.enviados) * 100) : 0
-        const taxaClique = st.enviados > 0 ? Math.round((st.clicados / st.enviados) * 100) : 0
-
-        return (
-          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
-              <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-start justify-between gap-4 rounded-t-2xl">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                    <BarChart3 className="size-5 text-indigo-600" /> Desempenho
-                  </h2>
-                  <p className="text-sm text-slate-600 mt-1 truncate">{modalDetalhes.assunto}</p>
-                </div>
-                <button onClick={() => { setModalDetalhes(null); setMsgSucesso('') }}
-                  className="text-slate-400 hover:text-slate-700 p-2 hover:bg-slate-200 rounded-lg">
-                  <X className="size-5" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-6">
-
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Progresso do envio</span>
-                    <span className="text-sm font-black text-slate-900">{st.enviados} / {st.total}</span>
-                  </div>
-                  <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-500"
-                      style={{ width: `${progresso}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-slate-500 font-bold">{progresso}% concluído</span>
-                    {st.pendentes > 0 && (
-                      <span className="text-xs text-blue-600 font-bold">{st.pendentes} restantes</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
-                    <Send className="size-5 text-blue-600 mx-auto mb-1" />
-                    <p className="text-2xl font-black text-slate-900">{st.enviados}</p>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Enviados</p>
-                  </div>
-                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-center">
-                    <Eye className="size-5 text-emerald-600 mx-auto mb-1" />
-                    <p className="text-2xl font-black text-slate-900">{st.abertos}</p>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
-                      Abriram
-                      <span className="block text-emerald-700">{taxaAbertura}%</span>
-                    </p>
-                  </div>
-                  <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-center">
-                    <MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" />
-                    <p className="text-2xl font-black text-slate-900">{st.clicados}</p>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
-                      Clicaram
-                      <span className="block text-purple-700">{taxaClique}%</span>
-                    </p>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
-                    <Hourglass className="size-5 text-slate-600 mx-auto mb-1" />
-                    <p className="text-2xl font-black text-slate-900">{st.pendentes}</p>
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Pendentes</p>
-                  </div>
-                </div>
-
-                {st.abertos > 0 && (
-                  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Target className="size-5 text-indigo-600" />
-                        <span className="text-sm font-black text-indigo-900">CTOR — Click-to-Open Rate</span>
-                      </div>
-                      <span className="text-2xl font-black text-indigo-700">{ctor}%</span>
-                    </div>
-                    <p className="text-xs text-indigo-700 font-medium">
-                      De <strong>{st.abertos}</strong> pessoas que abriram de verdade, <strong>{st.clicados}</strong> clicaram.
-                      {ctor >= 20 && <span className="block mt-1 text-emerald-700 font-bold">🎉 Acima da média (bom engajamento)!</span>}
-                      {ctor > 0 && ctor < 10 && <span className="block mt-1 text-amber-700 font-bold">⚠️ Abaixo do ideal — revise o CTA do e-mail.</span>}
-                    </p>
-                  </div>
-                )}
-
-                {st.reabertos > 0 && (
-                  <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-2">
-                    <Flame className="size-5 text-orange-600" />
-                    <p className="text-sm font-bold text-orange-900">
-                      {st.reabertos} lead(s) abriram 2+ vezes — <span className="text-orange-700">leads quentes!</span>
-                    </p>
-                  </div>
-                )}
-
-                {st.abertosBrutos > st.abertos && (
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2">
-                    <AlertCircle className="size-4 text-slate-500 shrink-0" />
-                    <p className="text-xs text-slate-600 font-medium">
-                      <strong>{st.abertosBrutos - st.abertos}</strong> hit(s) ignorado(s) por filtros (Apple MPP, prefetch ou bots).
-                      Total bruto: <strong>{st.abertosBrutos}</strong>.
-                    </p>
-                  </div>
-                )}
-
-                {st.falhados > 0 && (
-                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2">
-                    <AlertCircle className="size-5 text-rose-600" />
-                    <p className="text-sm font-bold text-rose-900">
-                      {st.falhados} envio(s) falharam
-                    </p>
-                  </div>
-                )}
-
-                <div className="border-t border-slate-100 pt-6">
-                  <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
-                    <Users className="size-4 text-indigo-600" /> Criar segmento
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
-                    <button
-                      onClick={() => setTipoSegmento('abridores')}
-                      className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300'}`}>
-                      <Eye className={`size-4 mb-1 ${tipoSegmento === 'abridores' ? 'text-emerald-600' : 'text-slate-400'}`} />
-                      <p className="text-xs font-bold text-slate-800">Abridores reais</p>
-                      <p className="text-[10px] text-slate-500">{st.abertos} contatos</p>
-                    </button>
-
-                    <button
-                      onClick={() => setTipoSegmento('clicadores')}
-                      className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'border-slate-200 hover:border-purple-300'}`}>
-                      <MousePointerClick className={`size-4 mb-1 ${tipoSegmento === 'clicadores' ? 'text-purple-600' : 'text-slate-400'}`} />
-                      <p className="text-xs font-bold text-slate-800">Clicadores</p>
-                      <p className="text-[10px] text-slate-500">{st.clicados} contatos</p>
-                    </button>
-
-                    <button
-                      onClick={() => setTipoSegmento('nao_abriram')}
-                      className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-amber-300'}`}>
-                      <AlertCircle className={`size-4 mb-1 ${tipoSegmento === 'nao_abriram' ? 'text-amber-600' : 'text-slate-400'}`} />
-                      <p className="text-xs font-bold text-slate-800">Não abriram</p>
-                      <p className="text-[10px] text-slate-500">{Math.max(st.enviados - st.abertos, 0)} contatos</p>
-                    </button>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={nomeNovaLista}
-                      onChange={e => setNomeNovaLista(e.target.value)}
-                      placeholder={`Nome da nova lista...`}
-                      className="flex-1 p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 text-sm"
-                    />
-                    <button
-                      onClick={criarSegmento}
-                      disabled={criandoLista || !nomeNovaLista.trim()}
-                      className="px-5 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md disabled:opacity-50 flex items-center gap-2 text-sm whitespace-nowrap">
-                      {criandoLista ? <Loader2 className="size-4 animate-spin" /> : <Copy className="size-4" />}
-                      Criar Lista
-                    </button>
-                  </div>
-
-                  {msgSucesso && (
-                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2">
-                      <CheckCircle2 className="size-4 text-emerald-600" />
-                      <p className="text-sm font-bold text-emerald-800">{msgSucesso}</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-slate-100 pt-4 flex flex-wrap gap-2">
-                  {modalDetalhes.status === 'Pausada' ? (
-                    <button
-                      onClick={() => alternarPausa(modalDetalhes)}
-                      className="px-4 py-2 rounded-lg font-bold text-white bg-emerald-600 hover:bg-emerald-700 flex items-center gap-2 text-sm">
-                      <Play className="size-4" /> Retomar campanha
-                    </button>
-                  ) : (modalDetalhes.status === 'Em Fila' || modalDetalhes.status === 'Enviando...') ? (
-                    <button
-                      onClick={() => alternarPausa(modalDetalhes)}
-                      className="px-4 py-2 rounded-lg font-bold text-white bg-slate-700 hover:bg-slate-800 flex items-center gap-2 text-sm">
-                      <Pause className="size-4" /> Pausar campanha
-                    </button>
-                  ) : null}
-
-                  <button
-                    onClick={() => { setModalDetalhes(null); abrirModalReenvio(modalDetalhes) }}
-                    className="px-4 py-2 rounded-lg font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center gap-2 text-sm">
-                    <RotateCcw className="size-4" /> Reenviar p/ não abriram
-                  </button>
-
-                  <button
-                    onClick={() => { setModalDetalhes(null); reutilizarCampanha(modalDetalhes) }}
-                    className="px-4 py-2 rounded-lg font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 flex items-center gap-2 text-sm">
-                    <Copy className="size-4" /> Reutilizar campanha
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* MODAL DE REENVIO */}
-      {modalReenvio && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="p-6 border-b border-slate-100 bg-amber-50">
-              <h2 className="text-xl font-black text-amber-900 flex items-center gap-2">
-                <RotateCcw className="size-5" /> Reenviar para quem não abriu
-              </h2>
-              <p className="text-amber-700 text-sm mt-1">
-                <strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram de verdade.
-              </p>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                <p className="text-xs font-bold text-slate-500 mb-1">Título original:</p>
-                <p className="text-sm font-bold text-slate-800">{modalReenvio.assunto}</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                  <Pencil className="size-4 text-slate-500" />
-                  Novo título do e-mail
-                </label>
-                <input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)}
-                  className="w-full p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-slate-700 font-medium" />
-              </div>
-            </div>
-
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => { setModalReenvio(null); setNovoTitulo('') }}
-                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors">
-                Cancelar
-              </button>
-              <button onClick={confirmarReenvio}
-                className="px-6 py-2.5 rounded-xl font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md flex items-center gap-2">
-                <RotateCcw className="size-4" /> Reenviar agora
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
