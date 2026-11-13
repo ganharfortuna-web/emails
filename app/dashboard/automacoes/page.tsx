@@ -80,21 +80,26 @@ export default function AutomacoesPage() {
     setAtualizando(false)
   }
 
-  // ✅ CORREÇÃO AQUI: Busca os dados exatos de cada campanha sem o limite bugado de 5000
+  // ✅ CORREÇÃO DEFINITIVA: Pede para o Supabase contar exatamente (sem limite de 1000)
   const carregarStats = async () => {
     const novasStats: Record<string, any> = {}
     
     for (const c of campanhas) {
-      const { data } = await supabase.from('email_queue').select('opened_at, clicked_at, status').eq('campaign_id', c.id)
-      
-      if (data) {
-        const total = data.length
-        const enviados = data.filter(d => d.status === 'sent').length
-        const pendentes = data.filter(d => d.status === 'pending').length
-        const abertos = data.filter(d => d.opened_at).length
-        const clicados = data.filter(d => d.clicked_at).length
+      // Faz a contagem exata de cada métrica diretamente no banco de dados
+      const [tot, env, pend, ab, cli] = await Promise.all([
+        supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id),
+        supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'sent'),
+        supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'pending'),
+        supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).not('opened_at', 'is', null),
+        supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).not('clicked_at', 'is', null)
+      ])
 
-        novasStats[String(c.id)] = { total, enviados, pendentes, abertos, clicados }
+      novasStats[String(c.id)] = {
+        total: tot.count || 0,
+        enviados: env.count || 0,
+        pendentes: pend.count || 0,
+        abertos: ab.count || 0,
+        clicados: cli.count || 0
       }
     }
     setStats(novasStats)
