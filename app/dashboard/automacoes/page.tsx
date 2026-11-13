@@ -69,7 +69,7 @@ export default function AutomacoesPage() {
   const [mensagem, setMensagem] = useState('')
   const [scheduledAt, setScheduledAt] = useState('')
   const [enviando, setEnviando] = useState(false)
-  const [disparandoEmLote, setDisparandoEmLote] = useState<string | null>(null)
+  const [processandoId, setProcessandoId] = useState<string | null>(null)
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [modalReenvio, setModalReenvio] = useState<any>(null)
@@ -115,10 +115,11 @@ export default function AutomacoesPage() {
     setAtualizando(false)
   }
 
+  // --- BUSCA ESTATÍSTICAS BLINDADA CONTRA COLUNAS AUSENTES ---
   const carregarStats = async () => {
     const { data, error } = await supabase
       .from('email_queue')
-      .select('campaign_id, opened_at, clicked_at, status, open_real_count, open_prefetch_count')
+      .select('campaign_id, opened_at, clicked_at, status')
 
     if (error || !data) return
 
@@ -136,12 +137,8 @@ export default function AutomacoesPage() {
       if (item.status === 'pending') agrupado[key].pendentes++
       if (item.status === 'failed') agrupado[key].falhados++
 
-      if ((item.open_real_count || 0) > 0) {
+      if (item.opened_at) {
         agrupado[key].abertos++
-        if (item.open_real_count > 1) agrupado[key].reabertos++
-      }
-
-      if ((item.open_real_count || 0) > 0 || (item.open_prefetch_count || 0) > 0) {
         agrupado[key].abertosBrutos++
       }
 
@@ -150,45 +147,44 @@ export default function AutomacoesPage() {
     setStats(agrupado)
   }
 
-  // --- LOOP AUTOMÁTICO SEGURO RESPEITANDO LIMITES DA VERCEL / SUPABASE ---
-  const dispararLotesEmSequencia = async (campanhaId: string | number) => {
-    setDisparandoEmLote(String(campanhaId))
+  // --- LOOP SEGURO RESPEITANDO LIMITES DA VERCEL E SUPABASE ---
+  const dispararCampanhaEmLotes = async (campanhaId: string | number) => {
+    setProcessandoId(String(campanhaId))
     let continuar = true
-    let totalEnviadosNestaSessao = 0
+    let totalEnviadosSessao = 0
 
     while (continuar) {
       try {
-        const res = await fetch('/api/disparo/processar', {
+        const r = await fetch('/api/disparo/processar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campanhaId }),
         })
-        const json = await res.json()
+        const j = await r.json()
 
-        if (!res.ok) {
-          console.error('Erro ao processar lote:', json.error)
+        if (!r.ok) {
+          alert(`⚠️ Erro ao processar lote: ${j.error || 'Erro desconhecido'}`)
           break
         }
 
-        totalEnviadosNestaSessao += (json.enviados || 0)
+        totalEnviadosSessao += (j.enviados || 0)
         await buscarCampanhas(true)
         await carregarStats()
 
-        // Se o backend indicou 'done: true' ou não restou nenhum pendente, encerra o loop
-        if (json.done || json.restantes === 0 || (json.enviados === 0 && json.processed === 0)) {
+        if (j.done || j.restantes === 0 || (j.enviados === 0 && j.processed === 0)) {
           continuar = false
         } else {
-          // Pequena pausa de 500ms entre os lotes para aliviar o Supabase e evitar Rate Limit
+          // Pequena pausa de 500ms entre lotes para aliviar o Supabase
           await new Promise(resolve => setTimeout(resolve, 500))
         }
       } catch (err) {
-        console.error('Falha de rede no disparo:', err)
+        console.error('Erro de conexão:', err)
         break
       }
     }
 
-    setDisparandoEmLote(null)
-    alert(`🎉 Processo concluído! Total enviado nesta sessão: ${totalEnviadosNestaSessao} e-mails.`)
+    setProcessandoId(null)
+    alert(`✅ Processo finalizado! ${totalEnviadosSessao} e-mails enviados nesta sessão.`)
   }
 
   const toggleSelecionada = (id: string) => {
@@ -245,15 +241,15 @@ export default function AutomacoesPage() {
     try {
       let query = supabase
         .from('email_queue')
-        .select('recipient_email, recipient_name, open_real_count, opened_at, clicked_at')
+        .select('recipient_email, recipient_name, opened_at, clicked_at')
         .eq('campaign_id', modalDetalhes.id)
 
       if (tipoSegmento === 'abridores') {
-        query = query.gt('open_real_count', 0)
+        query = query.not('opened_at', 'is', null)
       } else if (tipoSegmento === 'clicadores') {
         query = query.not('clicked_at', 'is', null)
       } else if (tipoSegmento === 'nao_abriram') {
-        query = query.eq('status', 'sent').or('open_real_count.is.null,open_real_count.eq.0')
+        query = query.eq('status', 'sent').is('opened_at', null)
       }
 
       const { data: itens, error } = await query
@@ -311,7 +307,7 @@ export default function AutomacoesPage() {
   const abrirModalReenvio = async (campanha: any) => {
     const { data } = await supabase
       .from('email_queue')
-      .select('id, open_real_count')
+      .select('id, opened_at')
       .eq('campaign_id', campanha.id)
       .eq('status', 'sent')
 
@@ -320,7 +316,7 @@ export default function AutomacoesPage() {
       return
     }
 
-    const naoAbriram = data.filter(d => !d.open_real_count || d.open_real_count === 0).length
+    const naoAbriram = data.filter(d => !d.opened_at).length
     if (naoAbriram === 0) {
       alert('🎉 Todos já abriram!')
       return
@@ -335,11 +331,11 @@ export default function AutomacoesPage() {
 
     const { data: originais } = await supabase
       .from('email_queue')
-      .select('recipient_email, recipient_name, subject, body, open_real_count')
+      .select('recipient_email, recipient_name, subject, body, opened_at')
       .eq('campaign_id', modalReenvio.id)
       .eq('status', 'sent')
 
-    const naoAbriram = (originais || []).filter(o => !o.open_real_count || o.open_real_count === 0)
+    const naoAbriram = (originais || []).filter(o => !o.opened_at)
 
     if (naoAbriram.length === 0) {
       alert('🎉 Todos já abriram!')
@@ -375,7 +371,7 @@ export default function AutomacoesPage() {
     setNovoTitulo('')
     buscarCampanhas()
 
-    dispararLotesEmSequencia(nova.id)
+    dispararCampanhaEmLotes(nova.id)
   }
 
   const prepararDisparo = async (e: React.FormEvent) => {
@@ -421,7 +417,7 @@ export default function AutomacoesPage() {
       }
 
       if (!scheduledAt) {
-        alert(`🎉 Campanha enfileirada com sucesso! Iniciando disparos automáticos...`)
+        alert(`🎉 Campanha criada! Iniciando envios em lotes automaticamente...`)
         setEnviando(false)
         setAssunto('')
         setMensagem('')
@@ -429,8 +425,7 @@ export default function AutomacoesPage() {
         setScheduledAt('')
         buscarCampanhas()
 
-        // Inicia o loop automático de envio em lotes seguros
-        dispararLotesEmSequencia(novaCampanha.id)
+        dispararCampanhaEmLotes(novaCampanha.id)
         return
       } else {
         alert(`📅 Campanha agendada para ${new Date(scheduledAt).toLocaleString('pt-BR')}`)
@@ -515,7 +510,7 @@ export default function AutomacoesPage() {
                 <div>
                   <p className="font-bold text-emerald-900 text-sm">Envio otimizado em lotes</p>
                   <p className="text-xs text-emerald-700 mt-1">
-                    O sistema processa os e-mails de forma segura e contínua respeitando os limites da Vercel e do Supabase.
+                    O sistema processa os e-mails de forma contínua respeitando os limites da Vercel e do Supabase.
                   </p>
                 </div>
               </div>
@@ -597,7 +592,7 @@ export default function AutomacoesPage() {
                 campanhas.map((campanha) => {
                   const sel = selecionadas.has(campanha.id)
                   const st = stats[String(campanha.id)] || { ...STATS_VAZIO }
-                  const estaDisparandoEste = disparandoEmLote === String(campanha.id)
+                  const estaDisparandoEste = processandoId === String(campanha.id)
 
                   const corStatus = campanha.status === 'Pausada' ? 'bg-slate-200 text-slate-700'
                     : campanha.status === 'Agendada' ? 'bg-purple-100 text-purple-700'
@@ -638,19 +633,9 @@ export default function AutomacoesPage() {
                                 <span className="flex items-center gap-1 text-blue-600" title="Enviados">
                                   <Send className="size-3" /> {st.enviados}/{st.total}
                                 </span>
-                                <span className="flex items-center gap-1 text-emerald-600" title="Abriram de verdade">
+                                <span className="flex items-center gap-1 text-emerald-600" title="Abriram">
                                   <Eye className="size-3" /> {st.abertos}
-                                  {st.enviados > 0 && (
-                                    <span className="text-[10px] opacity-70">
-                                      ({Math.round((st.abertos / st.enviados) * 100)}%)
-                                    </span>
-                                  )}
                                 </span>
-                                {st.reabertos > 0 && (
-                                  <span className="flex items-center gap-1 text-orange-600" title="Leads quentes">
-                                    <Flame className="size-3" /> {st.reabertos}
-                                  </span>
-                                )}
                                 <span className="flex items-center gap-1 text-purple-600" title="Cliques">
                                   <MousePointerClick className="size-3" /> {st.clicados}
                                 </span>
@@ -687,7 +672,7 @@ export default function AutomacoesPage() {
                             )}
                             {st.pendentes > 0 && campanha.status !== 'Pausada' && (
                               <button
-                                onClick={() => dispararLotesEmSequencia(campanha.id)}
+                                onClick={() => dispararCampanhaEmLotes(campanha.id)}
                                 disabled={estaDisparandoEste}
                                 className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
                                 {estaDisparandoEste ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
@@ -705,6 +690,198 @@ export default function AutomacoesPage() {
           </div>
         </div>
       </div>
+
+      {/* ============== MODAL DE DETALHES DA CAMPANHA ============== */}
+      {modalDetalhes && (() => {
+        const st = stats[String(modalDetalhes.id)] || { ...STATS_VAZIO }
+        const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
+        const ctor = st.abertos > 0 ? Math.round((st.clicados / st.abertos) * 100) : 0
+        const taxaAbertura = st.enviados > 0 ? Math.round((st.abertos / st.enviados) * 100) : 0
+        const taxaClique = st.enviados > 0 ? Math.round((st.clicados / st.enviados) * 100) : 0
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8">
+              <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-start justify-between gap-4 rounded-t-2xl">
+                <div className="min-w-0">
+                  <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                    <BarChart3 className="size-5 text-indigo-600" /> Desempenho
+                  </h2>
+                  <p className="text-sm text-slate-600 mt-1 truncate">{modalDetalhes.assunto}</p>
+                </div>
+                <button onClick={() => { setModalDetalhes(null); setMsgSucesso('') }}
+                  className="text-slate-400 hover:text-slate-700 p-2 hover:bg-slate-200 rounded-lg">
+                  <X className="size-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Progresso do envio</span>
+                    <span className="text-sm font-black text-slate-900">{st.enviados} / {st.total}</span>
+                  </div>
+                  <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-500"
+                      style={{ width: `${progresso}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-xs text-slate-500 font-bold">{progresso}% concluído</span>
+                    {st.pendentes > 0 && (
+                      <span className="text-xs text-blue-600 font-bold">{st.pendentes} restantes</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
+                    <Send className="size-5 text-blue-600 mx-auto mb-1" />
+                    <p className="text-2xl font-black text-slate-900">{st.enviados}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Enviados</p>
+                  </div>
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-center">
+                    <Eye className="size-5 text-emerald-600 mx-auto mb-1" />
+                    <p className="text-2xl font-black text-slate-900">{st.abertos}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                      Abriram
+                      <span className="block text-emerald-700">{taxaAbertura}%</span>
+                    </p>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-center">
+                    <MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" />
+                    <p className="text-2xl font-black text-slate-900">{st.clicados}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                      Clicaram
+                      <span className="block text-purple-700">{taxaClique}%</span>
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                    <Hourglass className="size-5 text-slate-600 mx-auto mb-1" />
+                    <p className="text-2xl font-black text-slate-900">{st.pendentes}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Pendentes</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 pt-6">
+                  <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
+                    <Users className="size-4 text-indigo-600" /> Criar segmento
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+                    <button
+                      onClick={() => setTipoSegmento('abridores')}
+                      className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300'}`}>
+                      <Eye className={`size-4 mb-1 ${tipoSegmento === 'abridores' ? 'text-emerald-600' : 'text-slate-400'}`} />
+                      <p className="text-xs font-bold text-slate-800">Abridores</p>
+                      <p className="text-[10px] text-slate-500">{st.abertos} contatos</p>
+                    </button>
+
+                    <button
+                      onClick={() => setTipoSegmento('clicadores')}
+                      className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'border-slate-200 hover:border-purple-300'}`}>
+                      <MousePointerClick className={`size-4 mb-1 ${tipoSegmento === 'clicadores' ? 'text-purple-600' : 'text-slate-400'}`} />
+                      <p className="text-xs font-bold text-slate-800">Clicadores</p>
+                      <p className="text-[10px] text-slate-500">{st.clicados} contatos</p>
+                    </button>
+
+                    <button
+                      onClick={() => setTipoSegmento('nao_abriram')}
+                      className={`p-3 rounded-xl border text-left transition-colors ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-amber-300'}`}>
+                      <AlertCircle className={`size-4 mb-1 ${tipoSegmento === 'nao_abriram' ? 'text-amber-600' : 'text-slate-400'}`} />
+                      <p className="text-xs font-bold text-slate-800">Não abriram</p>
+                      <p className="text-[10px] text-slate-500">{Math.max(st.enviados - st.abertos, 0)} contatos</p>
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={nomeNovaLista}
+                      onChange={e => setNomeNovaLista(e.target.value)}
+                      placeholder={`Nome da nova lista...`}
+                      className="flex-1 p-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 text-sm"
+                    />
+                    <button
+                      onClick={criarSegmento}
+                      disabled={criandoLista || !nomeNovaLista.trim()}
+                      className="px-5 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md disabled:opacity-50 flex items-center gap-2 text-sm whitespace-nowrap">
+                      {criandoLista ? <Loader2 className="size-4 animate-spin" /> : <Copy className="size-4" />}
+                      Criar Lista
+                    </button>
+                  </div>
+
+                  {msgSucesso && (
+                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2">
+                      <CheckCircle2 className="size-4 text-emerald-600" />
+                      <p className="text-sm font-bold text-emerald-800">{msgSucesso}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => { setModalDetalhes(null); abrirModalReenvio(modalDetalhes) }}
+                    className="px-4 py-2 rounded-lg font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center gap-2 text-sm">
+                    <RotateCcw className="size-4" /> Reenviar p/ não abriram
+                  </button>
+
+                  <button
+                    onClick={() => { setModalDetalhes(null); reutilizarCampanha(modalDetalhes) }}
+                    className="px-4 py-2 rounded-lg font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 flex items-center gap-2 text-sm">
+                    <Copy className="size-4" /> Reutilizar campanha
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* MODAL DE REENVIO */}
+      {modalReenvio && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="p-6 border-b border-slate-100 bg-amber-50">
+              <h2 className="text-xl font-black text-amber-900 flex items-center gap-2">
+                <RotateCcw className="size-5" /> Reenviar para quem não abriu
+              </h2>
+              <p className="text-amber-700 text-sm mt-1">
+                <strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-xs font-bold text-slate-500 mb-1">Título original:</p>
+                <p className="text-sm font-bold text-slate-800">{modalReenvio.assunto}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <Pencil className="size-4 text-slate-500" />
+                  Novo título do e-mail
+                </label>
+                <input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)}
+                  className="w-full p-4 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-slate-700 font-medium" />
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => { setModalReenvio(null); setNovoTitulo('') }}
+                className="px-5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={confirmarReenvio}
+                className="px-6 py-2.5 rounded-xl font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md flex items-center gap-2">
+                <RotateCcw className="size-4" /> Reenviar agora
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
