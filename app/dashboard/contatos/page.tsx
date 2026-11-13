@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { Search, Filter, Trash2, UserCircle2, MessageCircle } from 'lucide-react'
+import { Search, Filter, Trash2, UserCircle2, MessageCircle, Download, Loader2 } from 'lucide-react'
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
@@ -12,11 +12,15 @@ export default function ContatosPage() {
   const [busca, setBusca] = useState('')
   const [filtroLista, setFiltroLista] = useState('')
   const [carregando, setCarregando] = useState(true)
+  const [exportando, setExportando] = useState(false)
 
   useEffect(() => {
     carregarListas()
-    carregarContatos()
   }, [])
+
+  useEffect(() => {
+    carregarContatos()
+  }, [busca, filtroLista])
 
   const carregarListas = async () => {
     const { data } = await supabase.from('listas').select('id, nome')
@@ -35,36 +39,80 @@ export default function ContatosPage() {
     setCarregando(false)
   }
 
-  // Recarrega quando muda o filtro ou busca
-  useEffect(() => {
-    carregarContatos()
-  }, [busca, filtroLista])
-
   const deletarContato = async (id: string) => {
     if (!confirm('Tem certeza que deseja apagar este contato?')) return
     await supabase.from('contatos').delete().eq('id', id)
     carregarContatos()
   }
 
-  // Função para formatar o link do WhatsApp
   const formatarWhatsApp = (numero: string) => {
     if (!numero) return null
-    // Remove tudo que não é número
     let numLimpo = numero.replace(/\D/g, '')
-    
-    // Se o número tiver 10 ou 11 dígitos (DDD + número), adiciona o 55 do Brasil
     if (numLimpo.length === 10 || numLimpo.length === 11) {
       numLimpo = `55${numLimpo}`
     }
-    
     return `https://wa.me/${numLimpo}`
+  }
+
+  // ✅ FUNÇÃO PARA BAIXAR O CSV
+  const baixarCSV = async () => {
+    setExportando(true)
+    try {
+      // 1. Busca apenas os contatos ATIVOS (ignora bounces e descadastrados)
+      let query = supabase.from('contatos').select('*, listas(nome)').eq('status', 'ativo')
+      if (filtroLista) query = query.eq('lista_id', filtroLista)
+      
+      const { data, error } = await query
+      
+      if (error || !data) throw new Error('Erro ao buscar contatos')
+
+      if (data.length === 0) {
+        alert('Nenhum contato ativo para exportar nesta lista.')
+        setExportando(false)
+        return
+      }
+
+      // 2. Monta o CSV com BOM (\uFEFF) para o Excel ler acentos corretamente
+      const cabecalho = "Nome,Email,WhatsApp,Lista,Status\n"
+      const linhas = data.map(c => 
+        `"${c.nome || ''}","${c.email}","${c.whatsapp || ''}","${c.listas?.nome || ''}","${c.status}"`
+      ).join("\n")
+      
+      const csvContent = "\uFEFF" + cabecalho + linhas
+
+      // 3. Cria o arquivo e força o download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `contatos_limpos_${new Date().toISOString().split('T')[0]}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+    } catch (err: any) {
+      alert(err.message)
+    }
+    setExportando(false)
   }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <h2 className="text-3xl font-black text-slate-900">Contatos</h2>
-        <p className="text-slate-600 mt-1">Gerencie a sua base de leads.</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900">Contatos</h2>
+          <p className="text-slate-600 mt-1">Gerencie a sua base de leads.</p>
+        </div>
+        
+        {/* ✅ BOTÃO DE EXPORTAR CSV */}
+        <button 
+          onClick={baixarCSV}
+          disabled={exportando || carregando}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+        >
+          {exportando ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+          Baixar Contatos (CSV)
+        </button>
       </div>
 
       {/* BARRA DE BUSCA E FILTRO */}
@@ -76,7 +124,7 @@ export default function ContatosPage() {
             placeholder="Buscar por e-mail..." 
             value={busca}
             onChange={e => setBusca(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
           />
         </div>
         <div className="relative sm:w-64">
@@ -84,7 +132,7 @@ export default function ContatosPage() {
           <select 
             value={filtroLista}
             onChange={e => setFiltroLista(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none"
+            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none text-slate-800"
           >
             <option value="">Todas as Listas</option>
             {listas.map(l => (
@@ -111,7 +159,9 @@ export default function ContatosPage() {
             <tbody className="divide-y divide-slate-100">
               {carregando ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500">Carregando contatos...</td>
+                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
+                    <Loader2 className="size-6 animate-spin mx-auto text-blue-500" />
+                  </td>
                 </tr>
               ) : contatos.length === 0 ? (
                 <tr>
@@ -133,7 +183,6 @@ export default function ContatosPage() {
                         </div>
                       </td>
                       
-                      {/* COLUNA NOVA DO WHATSAPP */}
                       <td className="px-6 py-4">
                         {waLink ? (
                           <a 
@@ -184,7 +233,6 @@ export default function ContatosPage() {
           </table>
         </div>
         
-        {/* RODAPÉ DA TABELA */}
         <div className="bg-slate-50 border-t border-slate-200 px-6 py-3 flex items-center justify-between text-sm text-slate-500">
           <span>Mostrando {contatos.length} contato(s)</span>
         </div>
