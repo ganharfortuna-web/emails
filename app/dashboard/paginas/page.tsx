@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { Loader2, Plus, ExternalLink, Image as ImageIcon, LayoutTemplate } from 'lucide-react'
+import { Loader2, Plus, ExternalLink, Image as ImageIcon, LayoutTemplate, Pencil, XCircle } from 'lucide-react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 
@@ -37,6 +37,9 @@ export default function PaginasBuilderPage() {
   const [salvando, setSalvando] = useState(false)
   const [sucesso, setSucesso] = useState('')
 
+  // Estado de controle de edição
+  const [editandoId, setEditandoId] = useState<string | null>(null)
+
   // Estados do formulário
   const [titulo, setTitulo] = useState('')
   const [subtitulo, setSubtitulo] = useState('')
@@ -62,29 +65,58 @@ export default function PaginasBuilderPage() {
     setPaginas(data || [])
   }
 
-  // Função para aplicar templates prontos
+  const limparFormulario = () => {
+    setEditandoId(null)
+    setTitulo(''); setSubtitulo(''); setSlug(''); setAssunto(''); setCorpo(''); setRedirectUrl(''); setHeroImageUrl('')
+    setListaId('')
+    setBgColor('#0f172a'); setBtnColor('#ea580c'); setLayoutType('left')
+    setSucesso('')
+  }
+
+  // Função para carregar página existente no formulário
+  const handleEditar = (p: any) => {
+    setEditandoId(p.id)
+    setTitulo(p.titulo)
+    setSubtitulo(p.subtitulo || '')
+    setSlug(p.slug)
+    setListaId(p.lista_id ? String(p.lista_id) : '')
+    setAssunto(p.email_assunto)
+    setCorpo(p.email_corpo)
+    setRedirectUrl(p.redirect_url)
+    setBgColor(p.bg_color || '#0f172a')
+    setBtnColor(p.button_color || '#ea580c')
+    setHeroImageUrl(p.hero_image_url || '')
+    setLayoutType(p.layout_type || 'left')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Templates Profissionais
   const aplicarTemplate = (tipo: string) => {
+    limparFormulario()
     if (tipo === 'ebook') {
-      setTitulo('Baixe o E-book Grátis: O Guia Definitivo')
-      setSubtitulo('Preencha os dados abaixo e receba o material exclusivo direto no seu e-mail.')
-      setAssunto('Aqui está o seu E-book exclusivo!')
-      setCorpo('<h2>Olá, {{nome}}!</h2><p>Obrigado por se inscrever. Clique no link abaixo para baixar o seu material.</p><p><a href="LINK_DO_PDF">Clique aqui para baixar o E-book</a></p>')
+      setTitulo('Baixe o Guia Definitivo: Como Escalar sua Autoridade')
+      setSubtitulo('Preencha os dados ao lado e receba o material exclusivo direto no seu e-mail.')
+      setAssunto('O seu E-book exclusivo chegou!')
+      setCorpo('<h2>Olá, {{nome}}!</h2><p>Obrigado por se inscrever. O seu material está pronto.</p><p><a href="LINK_DO_PDF">Clique aqui para fazer o download do E-book</a></p>')
       setBgColor('#0f172a')
       setBtnColor('#ea580c')
+      setHeroImageUrl('https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=1000&auto=format&fit=crop')
     } else if (tipo === 'webinar') {
-      setTitulo('Webinar Exclusivo: Como Dobrar suas Vendas')
-      setSubtitulo('Garanta sua vaga gratuita e receba o link de acesso no seu e-mail.')
+      setTitulo('Webinar Exclusivo: O Futuro do Marketing Digital')
+      setSubtitulo('Garanta sua vaga gratuita e receba o link de acesso diretamente no seu e-mail.')
       setAssunto('Sua vaga para o Webinar está garantida!')
       setCorpo('<h2>Olá, {{nome}}!</h2><p>Sua vaga está reservada. O link de acesso será enviado minutos antes do evento.</p><p><a href="LINK_DO_EVENTO">Acessar a sala do Webinar</a></p>')
       setBgColor('#1e1b4b')
       setBtnColor('#10b981')
+      setHeroImageUrl('https://images.unsplash.com/photo-1591115765373-5207764f72e7?q=80&w=1000&auto=format&fit=crop')
     } else if (tipo === 'consultoria') {
-      setTitulo('Descubra como escalar o seu negócio')
-      setSubtitulo('Preencha o formulário e receba um diagnóstico gratuito da sua empresa.')
-      setAssunto('Recebemos seu pedido de diagnóstico!')
-      setCorpo('<h2>Olá, {{nome}}!</h2><p>Nossa equipe já recebeu os seus dados e entrará em contato pelo WhatsApp em breve.</p>')
+      setTitulo('Descubra como dobrar o faturamento da sua empresa')
+      setSubtitulo('Preencha o formulário e receba um diagnóstico gratuito da sua operação.')
+      setAssunto('Recebemos o seu pedido de diagnóstico!')
+      setCorpo('<h2>Olá, {{nome}}!</h2><p>Nossa equipe já recebeu os seus dados e entrará em contato pelo WhatsApp em breve para agendar a sua consultoria.</p>')
       setBgColor('#111827')
       setBtnColor('#3b82f6')
+      setHeroImageUrl('https://images.unsplash.com/photo-1556761175-5973dc0f32d7?q=80&w=1000&auto=format&fit=crop')
     }
   }
 
@@ -92,19 +124,37 @@ export default function PaginasBuilderPage() {
     e.preventDefault()
     setSalvando(true)
     setSucesso('')
+    
+    // Validação básica do editor
+    const textoLimpo = corpo.replace(/<[^>]*>?/gm, '').trim()
+    if (!textoLimpo) {
+      alert("O corpo do e-mail não pode estar vazio.")
+      setSalvando(false)
+      return
+    }
+
     const slugFormatado = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 
-    const { error } = await supabase.from('landing_pages').insert([{
+    const payload = {
       titulo, subtitulo, slug: slugFormatado, lista_id: listaId,
       email_assunto: assunto, email_corpo: corpo, redirect_url: redirectUrl,
       bg_color: bgColor, button_color: btnColor, hero_image_url: heroImageUrl, layout_type: layoutType
-    }])
+    }
+
+    let error;
+    if (editandoId) {
+      const res = await supabase.from('landing_pages').update(payload).eq('id', editandoId)
+      error = res.error
+    } else {
+      const res = await supabase.from('landing_pages').insert([payload])
+      error = res.error
+    }
 
     if (error) {
-      alert('Erro ao criar página: ' + error.message)
+      alert('Erro ao salvar página: ' + error.message)
     } else {
-      setSucesso(`Página criada! Link: /${slugFormatado}`)
-      setTitulo(''); setSubtitulo(''); setSlug(''); setAssunto(''); setCorpo(''); setRedirectUrl(''); setHeroImageUrl('')
+      setSucesso(`Página ${editandoId ? 'atualizada' : 'criada'} com sucesso! Link: /${slugFormatado}`)
+      limparFormulario()
       carregarPaginas()
     }
     setSalvando(false)
@@ -120,19 +170,27 @@ export default function PaginasBuilderPage() {
       </div>
 
       {/* TEMPLATES PRONTOS */}
-      <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-2xl">
-        <h3 className="text-indigo-900 font-bold mb-3 flex items-center gap-2"><LayoutTemplate className="size-5" /> Comece com um Template</h3>
-        <div className="flex gap-3 flex-wrap">
-          <button type="button" onClick={() => aplicarTemplate('ebook')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors">📚 E-book / Material</button>
-          <button type="button" onClick={() => aplicarTemplate('webinar')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors">🎥 Webinar / Evento</button>
-          <button type="button" onClick={() => aplicarTemplate('consultoria')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors">💼 Consultoria / Contato</button>
+      {!editandoId && (
+        <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-2xl">
+          <h3 className="text-indigo-900 font-bold mb-3 flex items-center gap-2"><LayoutTemplate className="size-5" /> Comece com um Template Profissional</h3>
+          <div className="flex gap-3 flex-wrap">
+            <button type="button" onClick={() => aplicarTemplate('ebook')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors shadow-sm">📚 E-book / Material</button>
+            <button type="button" onClick={() => aplicarTemplate('webinar')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors shadow-sm">🎥 Webinar / Evento</button>
+            <button type="button" onClick={() => aplicarTemplate('consultoria')} className="bg-white border border-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-100 transition-colors shadow-sm">💼 Consultoria / Contato</button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <form onSubmit={handleCriar} className="space-y-6">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+        {editandoId && (
+          <div className="absolute top-0 left-0 w-full bg-amber-100 text-amber-800 text-sm font-bold px-6 py-2 flex justify-between items-center">
+            Você está editando uma página existente.
+            <button onClick={limparFormulario} className="flex items-center gap-1 hover:text-amber-950"><XCircle className="size-4"/> Cancelar Edição</button>
+          </div>
+        )}
+
+        <form onSubmit={handleCriar} className={`space-y-6 ${editandoId ? 'mt-6' : ''}`}>
           
-          {/* SEÇÃO 1: TEXTOS BÁSICOS */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Título Principal</label>
@@ -149,10 +207,9 @@ export default function PaginasBuilderPage() {
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">Subtítulo (Chamada para ação)</label>
-            <input type="text" required value={subtitulo} onChange={e => setSubtitulo(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Preencha os dados abaixo para receber..." />
+            <input type="text" required value={subtitulo} onChange={e => setSubtitulo(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" />
           </div>
 
-          {/* SEÇÃO 2: DESIGN E IMAGEM */}
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-4">
             <h4 className="font-bold text-slate-800 flex items-center gap-2"><ImageIcon className="size-4"/> Design Visual</h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -179,13 +236,11 @@ export default function PaginasBuilderPage() {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">URL da Imagem ou Vídeo (Hero)</label>
-              <input type="url" value={heroImageUrl} onChange={e => setHeroImageUrl(e.target.value)} className="w-full p-3 border rounded-lg text-sm" placeholder="https://exemplo.com/imagem-do-ebook.png" />
-              <p className="text-[10px] text-slate-400 mt-1">Dica: Cole o link de uma imagem hospedada externamente (ex: Imgur, Drive público ou na sua pasta /public).</p>
+              <label className="block text-xs font-bold text-slate-600 mb-1">URL da Imagem (Hero)</label>
+              <input type="url" value={heroImageUrl} onChange={e => setHeroImageUrl(e.target.value)} className="w-full p-3 border rounded-lg text-sm" placeholder="https://imagem.png" />
             </div>
           </div>
 
-          {/* SEÇÃO 3: CONFIGURAÇÕES DE E-MAIL */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Integrar com qual lista?</label>
@@ -195,7 +250,7 @@ export default function PaginasBuilderPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Link de Obrigado (Redirect pós-cadastro)</label>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Link de Obrigado (Redirect)</label>
               <input type="url" required value={redirectUrl} onChange={e => setRedirectUrl(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="https://seusite.com/obrigado" />
             </div>
           </div>
@@ -207,14 +262,28 @@ export default function PaginasBuilderPage() {
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Corpo do E-mail <span className="text-slate-400 font-normal">(Use &#123;&#123;nome&#125;&#125; para personalizar)</span></label>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[200px]">
+            
+            {/* CORREÇÃO DA COR DO TEXTO NO EDITOR AQUI */}
+            <div className="bg-white rounded-xl border border-slate-200 overflow-visible 
+              [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none 
+              [&_.ql-editor]:min-h-[200px] [&_.ql-editor]:!text-black [&_.ql-editor_p]:!text-black [&_.ql-editor_span]:!text-black
+              [&_.ql-editor.ql-blank::before]:!text-slate-400">
               <ReactQuill theme="snow" value={corpo} onChange={setCorpo} modules={modulosEditor} placeholder="Escreva o e-mail que o lead vai receber..." />
             </div>
           </div>
 
-          <button type="submit" disabled={salvando} className="bg-blue-600 text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors w-full md:w-auto">
-            {salvando ? <Loader2 className="size-5 animate-spin" /> : <Plus className="size-5" />} Salvar e Publicar Página
-          </button>
+          <div className="flex gap-4">
+            <button type="submit" disabled={salvando} className="bg-blue-600 text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors flex-1 md:flex-none">
+              {salvando ? <Loader2 className="size-5 animate-spin" /> : <Plus className="size-5" />} 
+              {editandoId ? 'Salvar Alterações' : 'Salvar e Publicar Página'}
+            </button>
+            
+            {editandoId && (
+              <button type="button" onClick={limparFormulario} className="bg-slate-200 text-slate-700 font-bold px-8 py-4 rounded-xl hover:bg-slate-300 transition-colors">
+                Cancelar
+              </button>
+            )}
+          </div>
           {sucesso && <p className="text-emerald-600 font-bold text-sm bg-emerald-50 p-3 rounded-lg text-center">{sucesso}</p>}
         </form>
       </div>
@@ -224,14 +293,19 @@ export default function PaginasBuilderPage() {
         <h3 className="font-bold text-slate-800 mb-4">Suas Páginas Publicadas</h3>
         <div className="grid md:grid-cols-2 gap-3">
           {paginas.map(p => (
-            <div key={p.id} className="flex justify-between items-center p-4 border rounded-xl hover:bg-slate-50 transition-colors">
-              <div>
-                <p className="font-bold text-slate-800 truncate max-w-[200px]">{p.titulo}</p>
+            <div key={p.id} className="flex flex-col justify-between p-4 border rounded-xl hover:border-blue-300 transition-colors bg-slate-50">
+              <div className="mb-4">
+                <p className="font-bold text-slate-800 text-lg">{p.titulo}</p>
                 <p className="text-sm text-slate-500">/ {p.slug}</p>
               </div>
-              <Link href={`/${p.slug}`} target="_blank" className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm font-bold bg-blue-50 px-4 py-2 rounded-lg">
-                Ver <ExternalLink className="size-4" />
-              </Link>
+              <div className="flex gap-2">
+                <Link href={`/${p.slug}`} target="_blank" className="flex-1 justify-center text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm font-bold bg-blue-100 px-4 py-2 rounded-lg transition-colors">
+                  Visualizar <ExternalLink className="size-4" />
+                </Link>
+                <button onClick={() => handleEditar(p)} className="flex-1 justify-center text-amber-700 hover:text-amber-900 flex items-center gap-1 text-sm font-bold bg-amber-100 px-4 py-2 rounded-lg transition-colors">
+                  Editar <Pencil className="size-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
