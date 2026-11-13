@@ -117,9 +117,11 @@ export default function AutomacoesPage() {
 
   // --- BUSCA ESTATÍSTICAS BLINDADA CONTRA COLUNAS AUSENTES ---
   const carregarStats = async () => {
+    // Adicionado limit para não estourar o limite do Supabase caso a base cresça
     const { data, error } = await supabase
       .from('email_queue')
       .select('campaign_id, opened_at, clicked_at, status')
+      .limit(5000) 
 
     if (error || !data) return
 
@@ -152,6 +154,7 @@ export default function AutomacoesPage() {
     setProcessandoId(String(campanhaId))
     let continuar = true
     let totalEnviadosSessao = 0
+    let falhasConsecutivas = 0 // NOVO: Controle de timeout
 
     while (continuar) {
       try {
@@ -160,7 +163,24 @@ export default function AutomacoesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campanhaId }),
         })
-        const j = await r.json()
+
+        // NOVO: Tratamento blindado contra timeout da Vercel (504)
+        let j: any = null
+        try {
+          j = await r.json()
+        } catch (e) {
+          // Se não conseguir ler o JSON, provavelmente foi um erro 504 (Gateway Timeout)
+          console.warn(`⏳ O servidor demorou para responder (timeout). Tentando o próximo lote...`)
+          await new Promise(resolve => setTimeout(resolve, 3000))
+          falhasConsecutivas++
+          if (falhasConsecutivas >= 5) {
+             alert("⚠️ Muitos timeouts seguidos. O envio foi pausado por segurança. Clique em Disparar novamente para retomar.")
+             break
+          }
+          continue
+        }
+
+        falhasConsecutivas = 0 // Reseta contador se deu certo
 
         if (!r.ok) {
           alert(`⚠️ Erro ao processar lote: ${j.error || 'Erro desconhecido'}`)
@@ -168,23 +188,42 @@ export default function AutomacoesPage() {
         }
 
         totalEnviadosSessao += (j.enviados || 0)
-        await buscarCampanhas(true)
-        await carregarStats()
+        
+        // Atualiza a tela de fundo sem travar o fluxo
+        buscarCampanhas(true)
+        carregarStats()
 
-        if (j.done || j.restantes === 0 || (j.enviados === 0 && j.processed === 0)) {
+        // Condições para finalizar o loop
+        if (j.done || j.restantes === 0) {
+          continuar = false
+        } else if (j.enviados === 0 && j.processed === 0) {
+          // Se o backend retornou 0 processados (ex: todos da fila já eram bloqueados), paramos
           continuar = false
         } else {
-          // Pequena pausa de 500ms entre lotes para aliviar o Supabase
-          await new Promise(resolve => setTimeout(resolve, 500))
+          // Pausa de 1 segundo entre lotes para aliviar o Supabase
+          await new Promise(resolve => setTimeout(resolve, 1000))
         }
-      } catch (err) {
-        console.error('Erro de conexão:', err)
-        break
+      } catch (err: any) {
+        console.error('Erro de conexão de rede:', err)
+        falhasConsecutivas++
+        
+        if (falhasConsecutivas >= 3) {
+          alert(`⚠️ Conexão instável. O envio pausou após ${totalEnviadosSessao} e-mails. Clique em "Disparar" para continuar.`)
+          break
+        }
+        
+        // Espera e tenta novamente
+        await new Promise(resolve => setTimeout(resolve, 3000))
       }
     }
 
     setProcessandoId(null)
-    alert(`✅ Processo finalizado! ${totalEnviadosSessao} e-mails enviados nesta sessão.`)
+    buscarCampanhas(true)
+    carregarStats()
+    
+    if (totalEnviadosSessao > 0) {
+      alert(`✅ Processo finalizado! ${totalEnviadosSessao} e-mails enviados nesta sessão.`)
+    }
   }
 
   const toggleSelecionada = (id: string) => {
