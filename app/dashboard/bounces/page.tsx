@@ -1,285 +1,172 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Loader2, RefreshCw, MailX, ShieldAlert, RotateCcw, AlertTriangle, TrendingDown } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
+import { AlertTriangle, CheckCircle2, RotateCcw, Loader2, ShieldAlert, Download } from 'lucide-react'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
 export default function BouncesPage() {
-  const [bounces, setBounces] = useState<any[]>([])
-  const [supressoes, setSupressoes] = useState<any[]>([])
+  const [suprimidos, setSuprimidos] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
-  const [aba, setAba] = useState<'bounces' | 'suprimidos'>('bounces')
-  const [filtroTipo, setFiltroTipo] = useState<string>('todos')
+  const [reativando, setReativando] = useState(false)
+  const [filtro, setFiltro] = useState<'todos' | 'hard_bounce' | 'soft_bounce' | 'complaint'>('todos')
 
-  useEffect(() => { carregar() }, [])
+  useEffect(() => {
+    carregarLista()
+  }, [])
 
-  const carregar = async () => {
+  const carregarLista = async () => {
     setCarregando(true)
-    const [b, s] = await Promise.all([
-      supabase.from('bounce_log').select('*').order('created_at', { ascending: false }).limit(200),
-      supabase.from('suppression_list').select('*').order('created_at', { ascending: false }).limit(200),
-    ])
-    if (b.data) setBounces(b.data)
-    if (s.data) setSupressoes(s.data)
+    const { data } = await supabase.from('suppression_list').select('*').order('created_at', { ascending: false })
+    if (data) setSuprimidos(data)
     setCarregando(false)
   }
 
-  const removerSupressao = async (id: string, email: string) => {
-    if (!confirm(`Reativar ${email}?\n\nEle poderá receber e-mails novamente.`)) return
+  // Função para Baixar CSV
+  const baixarCSV = () => {
+    if (suprimidos.length === 0) return
 
-    await supabase.from('suppression_list').delete().eq('id', id)
-    await supabase.from('contatos').update({ status: 'ativo' }).eq('email', email)
-    carregar()
+    // Cria o cabeçalho e as linhas do CSV
+    const cabecalho = "Email,Motivo,Data\n"
+    const linhas = suprimidos.map(s => `${s.email},${s.reason},${new Date(s.created_at).toLocaleDateString('pt-BR')}`).join("\n")
+    const csvContent = cabecalho + linhas
+
+    // Cria o arquivo e força o download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('download', `lista_supressao_${new Date().toISOString().split('T')[0]}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
-  const removerTodasSupressoes = async () => {
-    if (!confirm(`Remover TODAS as ${supressoes.length} supressões?\n\nTodos os contatos voltarão a receber e-mails.`)) return
-
-    const emails = supressoes.map(s => s.email)
-    await supabase.from('suppression_list').delete().in('email', emails)
-    await supabase.from('contatos').update({ status: 'ativo' }).in('email', emails)
-    carregar()
+  const reativarUm = async (email: string) => {
+    if (!confirm(`Tem certeza que deseja reativar o e-mail ${email}?`)) return
+    
+    await supabase.from('suppression_list').delete().eq('email', email)
+    await supabase.from('contatos').update({ status: 'ativo', bounce_count: 0 }).eq('email', email)
+    
+    carregarLista()
   }
 
-  const corTipo = (tipo: string) =>
-    tipo === 'hard' ? 'bg-rose-100 text-rose-700 border-rose-200'
-    : tipo === 'soft' ? 'bg-amber-100 text-amber-700 border-amber-200'
-    : tipo === 'auth' ? 'bg-purple-100 text-purple-700 border-purple-200'
-    : tipo === 'rate_limit' ? 'bg-blue-100 text-blue-700 border-blue-200'
-    : tipo === 'complaint' ? 'bg-red-100 text-red-700 border-red-200'
-    : 'bg-slate-100 text-slate-700 border-slate-200'
+  const reativarTodos = async () => {
+    if (suprimidos.length === 0) return
+    if (!confirm(`⚠️ ATENÇÃO: Tem certeza que deseja reativar TODOS os ${suprimidos.length} e-mails?\n\nSe houver Hard Bounces (e-mails que não existem), a MailerLite pode bloquear sua conta.`)) return
 
-  const labelTipo = (tipo: string) =>
-    tipo === 'hard' ? 'Hard Bounce'
-    : tipo === 'soft' ? 'Soft Bounce'
-    : tipo === 'auth' ? 'Auth Error'
-    : tipo === 'rate_limit' ? 'Rate Limit'
-    : tipo === 'complaint' ? 'Spam Report'
-    : tipo === 'unknown' ? 'Desconhecido'
-    : tipo
-
-  const filtrados = filtroTipo === 'todos'
-    ? bounces
-    : bounces.filter(b => b.bounce_type === filtroTipo)
-
-  const stats = {
-    hard: bounces.filter(b => b.bounce_type === 'hard').length,
-    soft: bounces.filter(b => b.bounce_type === 'soft').length,
-    auth: bounces.filter(b => b.bounce_type === 'auth').length,
-    complaint: bounces.filter(b => b.bounce_type === 'complaint').length,
+    setReativando(true)
+    try {
+      const emails = suprimidos.map(s => s.email)
+      await supabase.from('suppression_list').delete().in('email', emails)
+      await supabase.from('contatos').update({ status: 'ativo', bounce_count: 0 }).in('email', emails)
+      alert(`✅ ${emails.length} e-mails foram reativados com sucesso!`)
+      carregarLista()
+    } catch (e: any) {
+      alert("Erro ao reativar: " + e.message)
+    }
+    setReativando(false)
   }
+
+  // Filtra a lista na tela
+  const listaFiltrada = suprimidos.filter(s => filtro === 'todos' ? true : s.reason === filtro)
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-
-      {/* Cabeçalho */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-3xl font-black text-slate-900">Bounces e Supressões</h2>
-          <p className="text-lg text-slate-600 mt-2">
-            Erros de entrega, retries automáticos e contatos bloqueados.
-          </p>
+          <h2 className="text-3xl font-black text-slate-900">Bounces e Supressão</h2>
+          <p className="text-slate-600 mt-1">Gerencie e-mails que falharam para proteger sua reputação.</p>
         </div>
-        <button onClick={carregar} disabled={carregando}
-          className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-2.5 px-4 rounded-lg shadow-sm disabled:opacity-50 text-sm">
-          <RefreshCw className={`size-4 ${carregando ? 'animate-spin' : ''}`} /> Atualizar
+        
+        <button 
+          onClick={baixarCSV} 
+          disabled={suprimidos.length === 0}
+          className="bg-white border border-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-lg shadow-sm flex items-center gap-2 hover:bg-slate-50 disabled:opacity-50"
+        >
+          <Download className="size-4" /> Baixar Lista (CSV)
         </button>
       </div>
 
-      {/* Cards de resumo */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <MailX className="size-5 text-rose-600" />
-            <span className="text-xs font-bold text-rose-700 uppercase">Hard</span>
+      {/* ALERTA DE AVISO */}
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex gap-3">
+          <AlertTriangle className="size-6 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <h3 className="font-bold text-amber-900">Lista de supressão ativa</h3>
+            <p className="text-sm text-amber-700 mt-1 max-w-2xl">
+              Estes e-mails nunca receberão novas mensagens até serem reativados manualmente. <strong>Recomendamos NÃO reativar Hard Bounces.</strong>
+            </p>
           </div>
-          <p className="text-3xl font-black text-slate-900">{stats.hard}</p>
-          <p className="text-xs text-rose-700 font-bold mt-1">E-mail inválido</p>
         </div>
-
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <AlertTriangle className="size-5 text-amber-600" />
-            <span className="text-xs font-bold text-amber-700 uppercase">Soft</span>
-          </div>
-          <p className="text-3xl font-black text-slate-900">{stats.soft}</p>
-          <p className="text-xs text-amber-700 font-bold mt-1">Temporário</p>
-        </div>
-
-        <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <ShieldAlert className="size-5 text-purple-600" />
-            <span className="text-xs font-bold text-purple-700 uppercase">Auth</span>
-          </div>
-          <p className="text-3xl font-black text-slate-900">{stats.auth}</p>
-          <p className="text-xs text-purple-700 font-bold mt-1">Conta desativada</p>
-        </div>
-
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <TrendingDown className="size-5 text-red-600" />
-            <span className="text-xs font-bold text-red-700 uppercase">Spam</span>
-          </div>
-          <p className="text-3xl font-black text-slate-900">{stats.complaint}</p>
-          <p className="text-xs text-red-700 font-bold mt-1">Marcado como spam</p>
-        </div>
+        
+        {suprimidos.length > 0 && (
+          <button 
+            onClick={reativarTodos} 
+            disabled={reativando}
+            className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50 shrink-0"
+          >
+            {reativando ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+            Reativar todas
+          </button>
+        )}
       </div>
 
-      {/* Abas */}
-      <div className="flex gap-2 border-b border-slate-200">
-        <button onClick={() => setAba('bounces')}
-          className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-1 ${
-            aba === 'bounces' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}>
-          <MailX className="size-4" /> Erros de envio ({bounces.length})
-        </button>
-        <button onClick={() => setAba('suprimidos')}
-          className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-1 ${
-            aba === 'suprimidos' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}>
-          <ShieldAlert className="size-4" /> Lista de supressão ({supressoes.length})
-        </button>
+      {/* FILTROS */}
+      <div className="flex gap-2 bg-white p-2 rounded-xl border border-slate-200 w-fit shadow-sm overflow-x-auto">
+        <button onClick={() => setFiltro('todos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${filtro === 'todos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
+        <button onClick={() => setFiltro('hard_bounce')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${filtro === 'hard_bounce' ? 'bg-red-100 text-red-700' : 'text-slate-500 hover:bg-slate-50'}`}>Hard Bounce</button>
+        <button onClick={() => setFiltro('soft_bounce')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${filtro === 'soft_bounce' ? 'bg-amber-100 text-amber-700' : 'text-slate-500 hover:bg-slate-50'}`}>Soft Bounce</button>
       </div>
 
-      {carregando ? (
-        <div className="flex justify-center p-12">
-          <Loader2 className="size-8 animate-spin text-blue-500" />
+      {/* TABELA */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-sm font-bold text-slate-500">
+                <th className="px-6 py-4">E-mail</th>
+                <th className="px-6 py-4">Motivo</th>
+                <th className="px-6 py-4">Data</th>
+                <th className="px-6 py-4 text-center">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {carregando ? (
+                <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500"><Loader2 className="size-6 animate-spin mx-auto text-blue-500" /></td></tr>
+              ) : listaFiltrada.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500 font-medium">
+                    <CheckCircle2 className="size-8 text-emerald-500 mx-auto mb-2" />
+                    Nenhum e-mail encontrado neste filtro.
+                  </td>
+                </tr>
+              ) : (
+                listaFiltrada.map((s) => (
+                  <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 font-medium text-slate-800">{s.email}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-bold border ${s.reason === 'hard_bounce' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+                        {s.reason === 'hard_bounce' ? 'Hard Bounce' : s.reason === 'complaint' ? 'Spam/Reclamação' : 'Soft Bounce'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {new Date(s.created_at).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <button onClick={() => reativarUm(s.email)} className="text-blue-600 hover:text-blue-800 font-bold text-sm flex items-center justify-center gap-1 mx-auto">
+                        <RotateCcw className="size-3" /> Reativar
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-      ) : aba === 'bounces' ? (
-        <>
-          {/* Filtros */}
-          {bounces.length > 0 && (
-            <div className="flex gap-2 flex-wrap">
-              {['todos', 'hard', 'soft', 'auth', 'rate_limit', 'complaint'].map(t => (
-                <button key={t} onClick={() => setFiltroTipo(t)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors ${
-                    filtroTipo === t
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                  }`}>
-                  {t === 'todos' ? 'Todos' : labelTipo(t)}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {filtrados.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
-              <p className="text-slate-500 font-medium text-lg">
-                🎉 Nenhum bounce registrado{filtroTipo !== 'todos' ? ' para este filtro' : ''}.
-              </p>
-            </div>
-          ) : (
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[700px]">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr>
-                      <th className="p-3 text-left font-bold">Data</th>
-                      <th className="p-3 text-left font-bold">E-mail</th>
-                      <th className="p-3 text-left font-bold">Tipo</th>
-                      <th className="p-3 text-left font-bold">Código</th>
-                      <th className="p-3 text-left font-bold">Mensagem</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filtrados.map(b => (
-                      <tr key={b.id} className="hover:bg-slate-50">
-                        <td className="p-3 text-slate-500 font-medium whitespace-nowrap">
-                          {new Date(b.created_at).toLocaleString('pt-BR')}
-                        </td>
-                        <td className="p-3 font-bold text-slate-800">{b.recipient_email}</td>
-                        <td className="p-3">
-                          <span className={`text-xs font-bold px-2 py-1 rounded border whitespace-nowrap ${corTipo(b.bounce_type)}`}>
-                            {labelTipo(b.bounce_type)}
-                          </span>
-                        </td>
-                        <td className="p-3 text-slate-500 font-mono text-xs">{b.error_code}</td>
-                        <td className="p-3 text-slate-600 text-xs max-w-md truncate" title={b.error_message}>
-                          {b.error_message}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          {supressoes.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
-              <p className="text-slate-500 font-medium text-lg">Nenhum e-mail suprimido.</p>
-              <p className="text-sm text-slate-400 mt-2">
-                Contatos com hard bounce ou spam report aparecerão aqui automaticamente.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-                <ShieldAlert className="size-5 text-amber-600 mt-0.5 shrink-0" />
-                <div className="flex-1">
-                  <p className="font-bold text-amber-900 text-sm">Lista de supressão ativa</p>
-                  <p className="text-xs text-amber-700 mt-1">
-                    Estes e-mails <strong>nunca</strong> receberão novas mensagens até serem reativados manualmente.
-                    Isso protege a reputação do seu domínio.
-                  </p>
-                </div>
-                <button onClick={removerTodasSupressoes}
-                  className="text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 px-3 py-1.5 rounded-lg flex items-center gap-1 shrink-0">
-                  <RotateCcw className="size-3" /> Reativar todas
-                </button>
-              </div>
-
-              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[600px]">
-                    <thead className="bg-slate-50 text-slate-600">
-                      <tr>
-                        <th className="p-3 text-left font-bold">E-mail</th>
-                        <th className="p-3 text-left font-bold">Motivo</th>
-                        <th className="p-3 text-left font-bold">Data</th>
-                        <th className="p-3 text-right font-bold">Ação</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {supressoes.map(s => (
-                        <tr key={s.id} className="hover:bg-slate-50">
-                          <td className="p-3 font-bold text-slate-800">{s.email}</td>
-                          <td className="p-3">
-                            <span className={`text-xs font-bold px-2 py-1 rounded border ${
-                              s.reason === 'complaint' ? 'bg-red-50 text-red-700 border-red-200'
-                              : s.reason === 'manual' ? 'bg-slate-50 text-slate-700 border-slate-200'
-                              : 'bg-rose-50 text-rose-700 border-rose-200'
-                            }`}>
-                              {s.reason === 'complaint' ? 'Spam' : s.reason === 'manual' ? 'Manual' : 'Hard Bounce'}
-                            </span>
-                          </td>
-                          <td className="p-3 text-slate-500 text-xs">
-                            {new Date(s.created_at).toLocaleDateString('pt-BR')}
-                          </td>
-                          <td className="p-3 text-right">
-                            <button onClick={() => removerSupressao(s.id, s.email)}
-                              className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 ml-auto">
-                              <RotateCcw className="size-3" /> Reativar
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
-        </>
-      )}
+      </div>
     </div>
   )
 }

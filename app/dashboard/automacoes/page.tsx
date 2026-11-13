@@ -96,7 +96,6 @@ export default function AutomacoesPage() {
     setAtualizando(false)
   }
 
-  // ✅ CORREÇÃO: Contagem exata pedindo direto pro Supabase (sem estourar o limite)
   const carregarStats = async () => {
     const novasStats: Record<string, StatsItem> = {}
     
@@ -120,7 +119,6 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  // ✅ CORREÇÃO DO LOOP: Agora ele não para se o backend limpar e-mails inválidos (enviados = 0)
   const dispararCampanhaEmLotes = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     let continuar = true
@@ -153,11 +151,9 @@ export default function AutomacoesPage() {
         buscarCampanhas(true)
         carregarStats()
 
-        // Só para se realmente não houver mais ninguém na fila
         if (j.done || j.restantes === 0) {
           continuar = false
         } else {
-          // Se enviou 0 mas ainda tem gente na fila, significa que ele limpou e-mails inválidos. Espera 1s e tenta de novo.
           await new Promise(resolve => setTimeout(resolve, 1500))
         }
       } catch (err: any) {
@@ -296,7 +292,6 @@ export default function AutomacoesPage() {
           <h2 className="text-3xl font-black text-slate-900">Automações</h2>
           <p className="text-slate-600 mt-1">Crie, agende e dispare e-mails em massa.</p>
         </div>
-        {/* ✅ BOTÃO ATUALIZAR COM COR CORRIGIDA */}
         <button onClick={() => buscarCampanhas(true)} disabled={atualizando} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold py-2.5 px-4 rounded-lg shadow-sm">
           <RefreshCw className={`size-4 ${atualizando ? 'animate-spin' : ''}`} /> Atualizar
         </button>
@@ -310,11 +305,11 @@ export default function AutomacoesPage() {
               <h3 className="font-bold text-slate-800">Nova Campanha</h3>
             </div>
             <div className="p-6 space-y-4">
-              <select value={listaSelecionada} onChange={e => setListaSelecionada(e.target.value)} required className="w-full p-4 rounded-xl border bg-white">
+              <select value={listaSelecionada} onChange={e => setListaSelecionada(e.target.value)} required className="w-full p-4 rounded-xl border bg-white text-slate-800">
                 <option value="">Selecione uma lista...</option>
                 {listas.map(l => <option key={l.id} value={l.id}>{l.nome} ({l.contatos[0]?.count || 0} leads)</option>)}
               </select>
-              <input type="text" placeholder="Assunto do E-mail" value={assunto} onChange={e => setAssunto(e.target.value)} required className="w-full p-4 rounded-xl border" />
+              <input type="text" placeholder="Assunto do E-mail" value={assunto} onChange={e => setAssunto(e.target.value)} required className="w-full p-4 rounded-xl border text-slate-800" />
               <div className="bg-white rounded-xl border overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:!text-black">
                 <ReactQuill theme="snow" value={mensagem} onChange={setMensagem} modules={modulosEditor} />
               </div>
@@ -329,7 +324,6 @@ export default function AutomacoesPage() {
           <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 flex items-center gap-2"><Clock className="size-5" /> Histórico</h3>
-              {/* ✅ BOTÃO DE SELECIONAR TODAS RESTAURADO */}
               {campanhas.length > 0 && (
                 <button onClick={toggleTodas} className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
                   {todasSelecionadas ? <CheckSquare className="size-4" /> : <Square className="size-4" />} Marcar todas
@@ -337,7 +331,6 @@ export default function AutomacoesPage() {
               )}
             </div>
 
-            {/* ✅ BARRA DE EXCLUSÃO RESTAURADA */}
             {selecionadas.size > 0 && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
                 <span className="text-sm font-bold text-blue-800">{selecionadas.size} selecionada(s)</span>
@@ -375,7 +368,6 @@ export default function AutomacoesPage() {
                         <span className="text-purple-600 flex items-center gap-1"><MousePointerClick className="size-3"/> {st.clicados}</span>
                       </div>
 
-                      {/* ✅ BOTOES DE AÇÃO RESTAURADOS */}
                       <div className="flex items-center gap-3 flex-wrap">
                         <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1">
                           <BarChart3 className="size-3" /> Desempenho
@@ -401,7 +393,6 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* ✅ MODAL DE DETALHES RESTAURADO */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
@@ -419,23 +410,36 @@ export default function AutomacoesPage() {
                 </div>
                 
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-blue-50 p-3 rounded-xl text-center"><Send className="size-5 text-blue-600 mx-auto mb-1" /><p className="text-2xl font-black">{st.enviados}</p><p className="text-[10px] font-bold text-slate-500">ENVIADOS</p></div>
-                  <div className="bg-emerald-50 p-3 rounded-xl text-center"><Eye className="size-5 text-emerald-600 mx-auto mb-1" /><p className="text-2xl font-black">{st.abertos}</p><p className="text-[10px] font-bold text-slate-500">ABRIRAM</p></div>
-                  <div className="bg-purple-50 p-3 rounded-xl text-center"><MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" /><p className="text-2xl font-black">{st.clicados}</p><p className="text-[10px] font-bold text-slate-500">CLICARAM</p></div>
+                  <div className="bg-blue-50 p-3 rounded-xl text-center"><Send className="size-5 text-blue-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.enviados}</p><p className="text-[10px] font-bold text-slate-500">ENVIADOS</p></div>
+                  <div className="bg-emerald-50 p-3 rounded-xl text-center"><Eye className="size-5 text-emerald-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.abertos}</p><p className="text-[10px] font-bold text-slate-500">ABRIRAM</p></div>
+                  <div className="bg-purple-50 p-3 rounded-xl text-center"><MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.clicados}</p><p className="text-[10px] font-bold text-slate-500">CLICARAM</p></div>
                 </div>
 
                 <div className="border-t pt-4">
-                  <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
+                  <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
+                  
+                  {/* ✅ CORES DOS TEXTOS DOS BOTÕES DE SEGMENTO CORRIGIDAS AQUI */}
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50'}`}><Eye className="size-4 mb-1 text-emerald-600"/><p className="text-xs font-bold">Abridores</p></button>
-                    <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50'}`}><MousePointerClick className="size-4 mb-1 text-purple-600"/><p className="text-xs font-bold">Clicadores</p></button>
-                    <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50'}`}><AlertCircle className="size-4 mb-1 text-amber-600"/><p className="text-xs font-bold">Não abriram</p></button>
+                    <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <Eye className="size-4 mb-1 text-emerald-600"/>
+                      <p className="text-xs font-bold text-slate-800">Abridores</p>
+                    </button>
+                    <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <MousePointerClick className="size-4 mb-1 text-purple-600"/>
+                      <p className="text-xs font-bold text-slate-800">Clicadores</p>
+                    </button>
+                    <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <AlertCircle className="size-4 mb-1 text-amber-600"/>
+                      <p className="text-xs font-bold text-slate-800">Não abriram</p>
+                    </button>
                   </div>
+                  
                   <div className="flex gap-2">
-                    <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm" />
+                    {/* ✅ TEXTO DO INPUT CORRIGIDO */}
+                    <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm text-slate-800" />
                     <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm">{criandoLista ? 'Criando...' : 'Criar'}</button>
                   </div>
-                  {msgSucesso && <p className="text-emerald-600 text-sm mt-2">{msgSucesso}</p>}
+                  {msgSucesso && <p className="text-emerald-600 text-sm mt-2 font-bold">{msgSucesso}</p>}
                 </div>
 
                 <div className="border-t pt-4 flex gap-2">
@@ -447,7 +451,6 @@ export default function AutomacoesPage() {
         )
       })()}
 
-      {/* ✅ MODAL DE REENVIO RESTAURADO */}
       {modalReenvio && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
@@ -458,7 +461,7 @@ export default function AutomacoesPage() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Pencil className="size-4 text-slate-500" /> Novo Assunto</label>
-                <input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)} className="w-full p-3 border rounded-xl" />
+                <input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)} className="w-full p-3 border rounded-xl text-slate-800" />
               </div>
             </div>
             <div className="p-6 border-t bg-slate-50 flex justify-end gap-3">
