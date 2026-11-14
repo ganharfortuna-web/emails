@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
+// ✅ 1. FUNÇÃO PRINCIPAL DE ENVIO
 export const processarFilaEmails = inngest.createFunction(
   { 
     id: "processar-fila-emails", 
@@ -11,11 +12,7 @@ export const processarFilaEmails = inngest.createFunction(
   },
   async ({ event, step }) => {
     const { campanhaId } = event.data;
-    
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
     const statusCampanha = await step.run("checar-status", async () => {
@@ -23,9 +20,7 @@ export const processarFilaEmails = inngest.createFunction(
       return data?.status;
     });
 
-    if (statusCampanha === 'Pausada') {
-      return "Campanha pausada. Envio interrompido.";
-    }
+    if (statusCampanha === 'Pausada') return "Campanha pausada. Envio interrompido.";
 
     const conta = await step.run("buscar-smtp", async () => {
       const { data } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single();
@@ -40,7 +35,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(20); // ✅ Lote de 20
+        .limit(20);
       return data || [];
     });
 
@@ -56,20 +51,17 @@ export const processarFilaEmails = inngest.createFunction(
 
     const transporter = nodemailer.createTransport({
       pool: true, 
-      maxConnections: 3, // ✅ 3 conexões
+      maxConnections: 5, 
       maxMessages: 100, 
       host: conta.host, 
       port: Number(conta.port), 
       secure: Number(conta.port) === 465,
       auth: { user: conta.email, pass: conta.app_password }, 
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 15000, 
-      greetingTimeout: 15000, 
-      socketTimeout: 20000,
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
     });
 
     for (const item of lote) {
-      // ✅ O try/catch fica DENTRO do step.run para NUNCA abortar o lote inteiro
       await step.run(`enviar-${item.id}`, async () => {
         try {
           let corpo = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente');
@@ -89,9 +81,7 @@ export const processarFilaEmails = inngest.createFunction(
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
         } catch (err: any) {
-          // Se der erro, marca como failed e APENAS RETORNA (não trava o loop)
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
-          return; 
         }
       });
     }
@@ -102,8 +92,7 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      // ✅ Pausa curta de 2 segundos e continua
-      await step.sleep("aguardar-rate-limit", "2s"); 
+      await step.sleep("aguardar-rate-limit", "5s"); 
       await step.sendEvent("continuar-envio", { name: "campanha/iniciar", data: { campanhaId } });
       return `Lote enviado. Restam ${restantes}.`;
     }
@@ -113,5 +102,49 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     return "Campanha concluída!";
+  }
+);
+
+// ✅ 2. O CÃO DE GUARDA (Roda sozinho a cada 10 minutos)
+// Se ele achar uma campanha "Enviando..." que ficou presa, ele chuta o processo de volta
+export const autoRecuperacao = inngest.createFunction(
+  { id: "auto-recuperacao" },
+  { cron: "*/10 * * * *" }, // A cada 10 minutos
+  async ({ step }) => {
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+
+    const campanhasParadas = await step.run("buscar-campanhas-paradas", async () => {
+      // Busca campanhas que estão como "Enviando..." há mais de 15 minutos
+      const dataLimite = new Date(Date.now() - 15 * 60000).toISOString();
+      const { data } = await supabase
+        .from('campanhas')
+        .select('id')
+        .eq('status', 'Enviando...')
+        .lt('updated_at', dataLimite);
+      return data || [];
+    });
+
+    if (campanhasParadas.length === 0) {
+      return "Nenhuma campanha travada encontrada.";
+    }
+
+    for (const camp of campanhasParadas) {
+      // Verifica se ainda tem gente pendente na fila
+      const { count } = await supabase
+        .from('email_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', camp.id)
+        .eq('status', 'pending');
+
+      if (count && count > 0) {
+        // Se tem gente pendente, acorda o Inngest novamente!
+        await step.sendEvent("reativar-envio", {
+          name: "campanha/iniciar",
+          data: { campanhaId: camp.id },
+        });
+      }
+    }
+
+    return `Reativando ${campanhasParadas.length} campanhas travadas.`;
   }
 );
