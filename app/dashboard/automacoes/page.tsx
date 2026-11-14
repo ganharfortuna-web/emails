@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, PlayCircle } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -274,6 +274,11 @@ export default function AutomacoesPage() {
               const estaDisparando = processandoId === String(c.id)
               const corStatus = c.status === 'Pausada' ? 'bg-slate-200 text-slate-700' : c.status === 'Agendada' ? 'bg-purple-100 text-purple-700' : c.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : c.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               
+              // Lógica de exibição de botões:
+              const isEnviada = c.status === 'Enviada';
+              const isPausada = c.status === 'Pausada';
+              const isEnviando = c.status === 'Enviando...' || c.status === 'Em Fila';
+
               return (
                 <div key={c.id} className={`p-4 rounded-xl border transition-colors ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'}`}>
                   <div className="flex gap-3 items-start">
@@ -294,8 +299,8 @@ export default function AutomacoesPage() {
                         <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"><BarChart3 className="size-3" /> Desempenho</button>
                         <button onClick={() => reutilizarCampanha(c)} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"><Copy className="size-3" /> Reutilizar</button>
                         
-                        {/* ✅ BOTÕES DE DISPARO GARANTIDOS */}
-                        {c.status !== 'Enviada' && st.pendentes > 0 && (
+                        {/* ✅ BOTÕES DE DISPARO - APARECEM SE NÃO ESTIVER ENVIADA */}
+                        {!isEnviada && (
                           <>
                             <button onClick={() => dispararCampanha(c.id, false)} disabled={estaDisparando} className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
                               {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Rocket className="size-3"/>} Inngest
@@ -306,10 +311,10 @@ export default function AutomacoesPage() {
                           </>
                         )}
                         
-                        {/* ✅ BOTÃO PAUSAR SÓ APARECE SE NÃO ESTIVER ENVIADA */}
-                        {c.status !== 'Enviada' && (
+                        {/* ✅ BOTÃO PAUSAR - APARECE SÓ SE ESTIVER ENVIANDO OU PAUSADA */}
+                        {(isEnviando || isPausada) && (
                           <button onClick={() => alternarPausa(c)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1">
-                            {c.status === 'Pausada' ? <Play className="size-3" /> : <Pause className="size-3" />} {c.status === 'Pausada' ? 'Retomar' : 'Pausar'}
+                            {isPausada ? <Play className="size-3" /> : <Pause className="size-3" />} {isPausada ? 'Retomar' : 'Pausar'}
                           </button>
                         )}
                       </div>
