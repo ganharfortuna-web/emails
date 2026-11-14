@@ -4,7 +4,7 @@ import nodemailer from "nodemailer";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
 // ==========================================
-// 1. FUNÇÃO PRINCIPAL DE ENVIO (Loop Automático)
+// 1. FUNÇÃO PRINCIPAL DE ENVIO
 // ==========================================
 export const processarFilaEmails = inngest.createFunction(
   { 
@@ -108,36 +108,35 @@ export const processarFilaEmails = inngest.createFunction(
 );
 
 // ==========================================
-// 2. O CÃO DE GUARDA (Auto-Recuperação e Agendamentos)
+// 2. O CÃO DE GUARDA E DESPERTADOR (CORRIGIDO)
 // ==========================================
 export const autoRecuperacao = inngest.createFunction(
   { 
     id: "auto-recuperacao",
-    concurrency: 1
+    concurrency: 1,
+    // ✅ SINTAXE CORRETA DO INNGEST (Sem erro na Vercel)
+    triggers: [{ cron: "*/2 * * * *" }] 
   },
-  // ✅ AGORA RODA A CADA 2 MINUTOS PARA SER MAIS RÁPIDO
-  { cron: "*/2 * * * *" }, 
   async ({ step }) => {
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
-    // ✅ PARTE 1: VERIFICAR AGENDAMENTOS VENCIDOS
+    // 1. Despertar agendamentos vencidos
     const agendadasVencidas = await step.run("buscar-agendadas-vencidas", async () => {
       const agora = new Date().toISOString();
       const { data } = await supabase
         .from('campanhas')
         .select('id')
         .eq('status', 'Agendada')
-        .lte('scheduled_at', agora); // Se o horário agendado for menor ou igual a agora
+        .lte('scheduled_at', agora); 
       return data || [];
     });
 
     for (const camp of agendadasVencidas) {
-      // Muda para 'Enviando...' e dispara
       await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', camp.id);
       await step.sendEvent("iniciar-agendada", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
     }
 
-    // ✅ PARTE 2: VERIFICAR CAMPANHAS TRAVADAS
+    // 2. Resgatar campanhas travadas
     const campanhasParadas = await step.run("buscar-campanhas-paradas", async () => {
       const dataLimite = new Date(Date.now() - 10 * 60000).toISOString();
       const { data } = await supabase
