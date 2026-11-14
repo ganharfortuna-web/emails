@@ -5,9 +5,13 @@ import { classificarErro, calcularProximaTentativa } from "@/lib/bounce";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
 export const processarFilaEmails = inngest.createFunction(
-  { id: "processar-fila-emails", concurrency: 1 },
-  { event: "campanha/iniciar" },
-  async ({ event, step }) => {
+  { 
+    id: "processar-fila-emails", 
+    concurrency: 1,
+    // ✅ O gatilho agora faz parte do objeto de configuração
+    triggers: [{ event: "campanha/iniciar" }] 
+  },
+  async ({ event, step }) => { // ✅ Apenas dois argumentos agora
     const { campanhaId } = event.data;
     
     const supabase = createClient(
@@ -16,7 +20,7 @@ export const processarFilaEmails = inngest.createFunction(
     );
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
-    // 1. Busca a conta SMTP (executado apenas uma vez)
+    // 1. Busca a conta SMTP
     const conta = await step.run("buscar-smtp", async () => {
       const { data } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single();
       if (!data) throw new Error("Nenhuma conta SMTP ativa configurada.");
@@ -31,7 +35,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(20); // Envia de 20 em 20 (muito seguro para o Inngest)
+        .limit(20);
       return data || [];
     });
 
@@ -53,7 +57,7 @@ export const processarFilaEmails = inngest.createFunction(
       connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
     });
 
-    // 4. Envia os e-mails (cada envio é uma "etapa" que o Inngest gerencia)
+    // 4. Envia os e-mails
     for (const item of lote) {
       await step.run(`enviar-${item.id}`, async () => {
         try {
@@ -72,15 +76,15 @@ export const processarFilaEmails = inngest.createFunction(
           });
 
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
-          await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id); // Atualiza contador
+          await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
         } catch (err: any) {
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
-          throw err; // Joga o erro para o Inngest tentar de novo automaticamente
+          throw err;
         }
       });
     }
 
-    // 5. Verifica se ainda há e-mails pendentes. Se sim, se auto-dispara novamente!
+    // 5. Verifica se ainda há e-mails pendentes e se auto-dispara novamente
     const restantes = await step.run("checar-restantes", async () => {
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', campanhaId).eq('status', 'pending');
       return count || 0;
