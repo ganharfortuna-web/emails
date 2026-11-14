@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CheckCircle2, Target, CalendarClock } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -95,7 +95,6 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  // ✅ LOOP À PROVA DE FALHAS (Lida com Timeout da Vercel sem parar)
   const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     let continuar = true
@@ -113,11 +112,10 @@ export default function AutomacoesPage() {
             body: JSON.stringify({ campanhaId }),
           })
 
-          // Se a Vercel der Timeout (504) ou erro de gateway, não paramos o loop!
           if (r.status === 504 || r.status === 502) {
             falhasSeguidas++
             if (falhasSeguidas > 10) throw new Error("Muitos timeouts seguidos.")
-            await new Promise(res => setTimeout(res, 3000)) // Espera 3s e tenta de novo
+            await new Promise(res => setTimeout(res, 3000))
             continue
           }
 
@@ -127,13 +125,12 @@ export default function AutomacoesPage() {
           }
 
           const j = await r.json()
-          falhasSeguidas = 0 // Reseta falhas se deu certo
+          falhasSeguidas = 0
           
           buscarCampanhas(true)
           carregarStats()
 
           if (j.done || j.restantes === 0 || j.enviados === 0) {
-            // Se retornou 0 enviados mas ainda restam, pode ser que limpou a fila de erros. Tentamos mais uma vez.
             if (j.restantes > 0 && j.enviados === 0) {
                await new Promise(res => setTimeout(res, 2000))
                continue
@@ -149,7 +146,7 @@ export default function AutomacoesPage() {
         }
       }
     } catch (err: any) {
-      alert(`⚠️ O envio pausou: ${err.message}. \n\nIsso pode ter acontecido por limite da Vercel. Use o Cron Job ou clique em Disparar novamente.`)
+      alert(`⚠️ O envio pausou: ${err.message}. \n\nIsso pode ter acontecido por limite da Vercel.`)
     }
 
     setProcessandoId(null)
@@ -249,13 +246,22 @@ export default function AutomacoesPage() {
     <div className="max-w-6xl mx-auto space-y-8">
       <div className="flex justify-between items-center">
         <div><h2 className="text-3xl font-black text-slate-900">Automações</h2><p className="text-slate-600 mt-1">Crie e dispare campanhas.</p></div>
-        <button onClick={() => buscarCampanhas(true)} disabled={atualizando} className="flex items-center gap-2 bg-white border px-4 py-2 rounded-lg text-sm font-bold shadow-sm"><RefreshCw className={`size-4 ${atualizando ? 'animate-spin' : ''}`} /> Atualizar</button>
+        
+        {/* ✅ COR DO TEXTO DO BOTÃO ATUALIZAR CORRIGIDA */}
+        <button onClick={() => buscarCampanhas(true)} disabled={atualizando} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 font-bold py-2.5 px-4 rounded-lg shadow-sm">
+          <RefreshCw className={`size-4 ${atualizando ? 'animate-spin text-blue-600' : ''}`} /> Atualizar
+        </button>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <form onSubmit={prepararDisparo} className="bg-white rounded-2xl border shadow-sm">
-            <div className="p-6 border-b bg-slate-50 rounded-t-2xl flex items-center gap-3"><Mail className="size-5 text-blue-600" /><h3 className="font-bold">Nova Campanha</h3></div>
+            <div className="p-6 border-b bg-slate-50 rounded-t-2xl flex items-center gap-3">
+              <Mail className="size-5 text-blue-600" />
+              
+              {/* ✅ COR DO TEXTO "NOVA CAMPANHA" CORRIGIDA */}
+              <h3 className="font-bold text-slate-800">Nova Campanha</h3>
+            </div>
             <div className="p-6 space-y-4">
               <select value={listaSelecionada} onChange={e => setListaSelecionada(e.target.value)} required className="w-full p-4 rounded-xl border bg-white text-slate-800">
                 <option value="">Selecione uma lista...</option>
