@@ -7,8 +7,8 @@ import { prepararHtmlEmail } from '@/lib/email-html'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60; 
 
-// ✅ Lote ultra seguro: 5 e-mails por vez (vai gastar menos de 10s)
-const BATCH_SIZE = 7
+// ✅ Lote ultra seguro: quantidade de e-mails por vez (vai gastar menos de 10s)
+const BATCH_SIZE = 30
 
 export async function GET(request: Request) { return handleCron(request) }
 
