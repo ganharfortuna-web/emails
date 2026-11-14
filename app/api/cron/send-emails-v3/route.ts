@@ -5,10 +5,10 @@ import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60; // Permite a Vercel rodar por até 60s
+export const maxDuration = 60; 
 
-// ✅ Lote seguro de 15 e-mails
-const BATCH_SIZE = 15
+// ✅ Lote ultra seguro: 5 e-mails por vez (vai gastar menos de 10s)
+const BATCH_SIZE = 7
 
 export async function GET(request: Request) { return handleCron(request) }
 
@@ -29,18 +29,22 @@ async function handleCron(request: Request) {
   const supabase = createClient(supabaseUrl!, supabaseKey!)
 
   try {
-    // 1. Verifica se a conta SMTP está ativa e qual o limite
-    const { data: contas } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).order('sent_today', { ascending: true }).limit(1)
-    if (!contas || contas.length === 0) return NextResponse.json({ message: 'Sem contas ativas.' })
+    // 1. Verifica se a conta SMTP está ativa
+    const { data: contas } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1)
+    
+    // 🚨 Se a conta foi desativada por erro de login, ele avisa aqui
+    if (!contas || contas.length === 0) {
+      console.log("ERRO: Conta SMTP está inativa ou não existe.")
+      return NextResponse.json({ message: 'Sem contas ativas.' })
+    }
     
     const conta = contas[0]
-    // Respeita o limite dinâmico configurado (80.000)
     if ((conta.sent_today || 0) >= (conta.daily_limit || 80000)) {
       return NextResponse.json({ message: 'Limite diário atingido.' })
     }
 
     // 2. Busca e-mails pendentes na fila
-    const { data: filaRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(50)
+    const { data: filaRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(20)
     if (!filaRaw || filaRaw.length === 0) return NextResponse.json({ message: 'Fila vazia.' })
 
     // 3. Filtra descadastrados
@@ -50,14 +54,16 @@ async function handleCron(request: Request) {
     const filaFiltrada = filaRaw.filter(i => !emailsSuprimidos.has((i.recipient_email || '').toLowerCase())).slice(0, BATCH_SIZE)
     if (filaFiltrada.length === 0) return NextResponse.json({ message: 'Sem elegíveis.' })
 
-    // 4. Configura o envio
+    // 4. Configura o envio (Timeouts curtos para não travar o cron)
     const transporter = nodemailer.createTransport({
       host: conta.host || 'smtp.gmail.com', 
       port: Number(conta.port) || 587,
       secure: Number(conta.port) === 465,
       auth: { user: conta.email, pass: conta.app_password }, 
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
+      connectionTimeout: 8000, 
+      greetingTimeout: 8000, 
+      socketTimeout: 8000,
     })
 
     let enviados = 0
@@ -87,6 +93,7 @@ async function handleCron(request: Request) {
         enviados++
         if (item.campaign_id) campaignIds.add(item.campaign_id)
       } catch (err: any) {
+        console.error(`Erro ao enviar para ${item.recipient_email}:`, err.message)
         const classificacao = classificarErro(err.message, err.response)
         const retryCount = (item.retry_count || 0) + 1
         
