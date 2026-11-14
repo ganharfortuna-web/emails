@@ -36,24 +36,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Campanha não encontrada.' }, { status: 404 });
     }
 
-    // 3. Monta o Payload no formato da Mailrelay
-    // ⚠️ ATENÇÃO: O 'sender_id' geralmente é um número. Se der erro, você precisará colocar o ID numérico do remetente da sua conta Mailrelay.
+    // 3. Valida o ID do grupo
+    if (!apiConfig.list_id || String(apiConfig.list_id).trim() === '') {
+      return NextResponse.json({ 
+        error: 'ID da Lista/Grupo não configurado. Vá em Configurações > API Externa e preencha o ID do grupo na Mailrelay.' 
+      }, { status: 400 });
+    }
+
+    // 4. Garante que a tag de descadastro esteja no HTML
+    // A Mailrelay exige que o link de unsubscribe esteja presente.
+    let htmlContent = campanha.mensagem || '';
+    if (!htmlContent.includes('unsubscribe_url')) {
+      htmlContent += `<br/><br/><hr style="border:none;border-top:1px solid #eee;margin:20px 0;"/><p style="font-size:12px;color:#888;text-align:center;">
+        <a href="{{ unsubscribe_url }}">Clique aqui para se descadastrar</a>
+      </p>`;
+    }
+
+    // 5. Monta o Payload no formato da Mailrelay
     const payload = {
       subject: campanha.assunto,
-      html: campanha.mensagem,
+      html: htmlContent,
       sender_id: 1, // Substitua pelo ID numérico do remetente na Mailrelay, se necessário
       target: 'groups',
-      group_ids: apiConfig.list_id ? [Number(apiConfig.list_id)] : [], // Converte o ID da lista para número
+      group_ids: [Number(apiConfig.list_id)], // Garante que o ID seja um número dentro de um array
       track_opens: true,
       track_clicks: true
     };
 
-    // 4. Dispara para a API externa usando as credenciais do banco
+    // 6. Dispara para a API da Mailrelay
     const apiRes = await fetch(apiConfig.api_url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-AUTH-TOKEN': apiConfig.api_key, // ✅ CORREÇÃO AQUI: Mailrelay usa X-AUTH-TOKEN
+        'X-AUTH-TOKEN': apiConfig.api_key,
       },
       body: JSON.stringify(payload),
     });
@@ -66,9 +81,9 @@ export async function POST(request: Request) {
 
     const mailrelayCampaignId = apiData.id;
 
-    // 5. Dispara a campanha imediatamente (Comando de envio da Mailrelay)
+    // 7. Dispara a campanha imediatamente
     if (mailrelayCampaignId) {
-      const urlBase = apiConfig.api_url.replace('/campaigns', ''); // Pega a URL base
+      const urlBase = apiConfig.api_url.replace('/campaigns', '');
       const sendRes = await fetch(`${urlBase}/campaigns/${mailrelayCampaignId}/send_all`, {
         method: 'POST',
         headers: {
@@ -83,7 +98,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 6. Atualiza o status no seu banco para não tentar enviar via SMTP novamente
+    // 8. Atualiza o status no seu banco
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId);
     await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('campaign_id', campanhaId).eq('status', 'pending');
 
