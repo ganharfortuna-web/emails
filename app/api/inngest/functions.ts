@@ -108,18 +108,36 @@ export const processarFilaEmails = inngest.createFunction(
 );
 
 // ==========================================
-// 2. O CÃO DE GUARDA (Inngest Cron Nativo)
+// 2. O CÃO DE GUARDA (Auto-Recuperação e Agendamentos)
 // ==========================================
 export const autoRecuperacao = inngest.createFunction(
   { 
     id: "auto-recuperacao",
-    concurrency: 1,
-    // ✅ CORREÇÃO AQUI: O cron agora fica dentro do primeiro objeto como 'triggers'
-    triggers: [{ cron: "*/10 * * * *" }]
+    concurrency: 1
   },
-  async ({ step }) => { // ✅ Apenas dois argumentos agora
+  // ✅ AGORA RODA A CADA 2 MINUTOS PARA SER MAIS RÁPIDO
+  { cron: "*/2 * * * *" }, 
+  async ({ step }) => {
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
+    // ✅ PARTE 1: VERIFICAR AGENDAMENTOS VENCIDOS
+    const agendadasVencidas = await step.run("buscar-agendadas-vencidas", async () => {
+      const agora = new Date().toISOString();
+      const { data } = await supabase
+        .from('campanhas')
+        .select('id')
+        .eq('status', 'Agendada')
+        .lte('scheduled_at', agora); // Se o horário agendado for menor ou igual a agora
+      return data || [];
+    });
+
+    for (const camp of agendadasVencidas) {
+      // Muda para 'Enviando...' e dispara
+      await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', camp.id);
+      await step.sendEvent("iniciar-agendada", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
+    }
+
+    // ✅ PARTE 2: VERIFICAR CAMPANHAS TRAVADAS
     const campanhasParadas = await step.run("buscar-campanhas-paradas", async () => {
       const dataLimite = new Date(Date.now() - 10 * 60000).toISOString();
       const { data } = await supabase
@@ -130,10 +148,7 @@ export const autoRecuperacao = inngest.createFunction(
       return data || [];
     });
 
-    if (campanhasParadas.length === 0) {
-      return "Nenhuma campanha travada encontrada.";
-    }
-
+    let reativadas = 0;
     for (const camp of campanhasParadas) {
       const { count } = await supabase
         .from('email_queue')
@@ -146,9 +161,10 @@ export const autoRecuperacao = inngest.createFunction(
           name: "campanha/iniciar",
           data: { campanhaId: camp.id },
         });
+        reativadas++;
       }
     }
 
-    return `Reativando ${campanhasParadas.length} campanhas que estavam travadas.`;
+    return `Agendamentos iniciados: ${agendadasVencidas.length}. Campanhas resgatadas: ${reativadas}.`;
   }
 );
