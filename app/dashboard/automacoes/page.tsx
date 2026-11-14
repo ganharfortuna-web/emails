@@ -381,9 +381,9 @@ export default function AutomacoesPage() {
               const sel = selecionadas.has(c.id)
               const estaDisparando = processandoId === String(c.id)
               
+              // ✅ NOVA LÓGICA VISUAL: Só diz "Enviando" se ainda tem gente na fila.
+              const temTrabalhoPendente = st.pendentes > 0; 
               const temFalhas = st.falhados > 0;
-              const temTrabalhoPendente = st.pendentes > 0; // ✅ Agora só conta o que está 'pending' de verdade
-              const faltam = st.pendentes; // ✅ Mostra apenas os pendentes
 
               let displayStatus = c.status;
               let corStatus = 'bg-amber-100 text-amber-700';
@@ -398,7 +398,7 @@ export default function AutomacoesPage() {
                 displayStatus = 'Enviando...';
                 corStatus = 'bg-cyan-100 text-cyan-700';
               } else if (temFalhas) {
-                displayStatus = 'Finalizada c/ Erros'; // ✅ Novo status claro
+                displayStatus = 'Finalizada c/ Erros'; // ✅ Se a fila acabou e tem erros, muda o status
                 corStatus = 'bg-red-100 text-red-700';
               } else {
                 displayStatus = 'Enviada';
@@ -413,7 +413,8 @@ export default function AutomacoesPage() {
                       <div className="flex justify-between mb-2">
                         <span className={`text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1 ${corStatus}`}>
                           <Hourglass className="size-3" /> {displayStatus} 
-                          {temTrabalhoPendente && <span className="ml-1 opacity-70">({faltam} restam)</span>}
+                          {/* ✅ Só mostra "restam" se estiver pending */}
+                          {temTrabalhoPendente && <span className="ml-1 opacity-70">({st.pendentes} restam)</span>}
                         </span>
                       </div>
                       <p className="font-bold text-slate-800 text-sm truncate">{c.assunto}</p>
@@ -436,7 +437,7 @@ export default function AutomacoesPage() {
                           </button>
                         )}
                         
-                        {/* ✅ ÚNICO BOTÃO DE ERRO: Abre o modal para ver antes de fazer qualquer coisa */}
+                        {/* ✅ ÚNICO BOTÃO DE ERRO (Ver Erros) */}
                         {st.falhados > 0 && (
                           <button onClick={() => abrirModalErros(c)} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded">
                             <ShieldAlert className="size-3"/> Ver Erros ({st.falhados})
@@ -458,14 +459,14 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* ✅ MODAL DE ERROS */}
+      {/* ✅ MODAL DE ERROS (LISTA OS EMAILS) */}
       {modalErros && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[80vh]">
             <div className="p-6 border-b bg-red-50 flex justify-between items-center shrink-0">
               <div>
                 <h2 className="text-xl font-black text-red-900 flex items-center gap-2"><ShieldAlert className="size-5" /> Detalhes dos Erros</h2>
-                <p className="text-red-700 text-sm mt-1">Abaixo estão os e-mails que falharam e o motivo. Você pode tentar novamente ou apagar.</p>
+                <p className="text-red-700 text-sm mt-1">Abaixo estão os e-mails que falharam. Você pode tentar novamente ou apagar.</p>
               </div>
               <button onClick={() => setModalErros(null)} className="text-red-400 hover:text-red-700"><X className="size-5" /></button>
             </div>
