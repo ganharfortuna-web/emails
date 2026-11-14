@@ -260,9 +260,24 @@ export default function AutomacoesPage() {
     setSelecionadas(new Set()); buscarCampanhas()
   }
 
+  // ✅ CORREÇÃO AQUI: O botão retomar agora avisa o Inngest para continuar!
   const alternarPausa = async (campanha: any) => {
-    const novoStatus = campanha.status === 'Pausada' ? 'Em Fila' : 'Pausada'
-    await supabase.from('campanhas').update({ status: novoStatus }).eq('id', campanha.id)
+    const isPausando = campanha.status !== 'Pausada';
+    const novoStatus = isPausando ? 'Pausada' : 'Em Fila';
+    
+    await supabase.from('campanhas').update({ status: novoStatus }).eq('id', campanha.id);
+    
+    if (!isPausando) {
+      // Se acabou de retomar, envia o evento pro Inngest acordar
+      try {
+        await fetch('/api/disparo/iniciar', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ campanhaId: campanha.id }) 
+        })
+      } catch(e) { console.error(e) }
+    }
+
     buscarCampanhas()
     if (modalDetalhes?.id === campanha.id) setModalDetalhes({ ...modalDetalhes, status: novoStatus })
   }
@@ -379,7 +394,6 @@ export default function AutomacoesPage() {
               const temTrabalhoPendente = st.enviados < st.total;
               const faltam = st.total - st.enviados;
 
-              // ✅ A LÓGICA VISUAL AGORA RESPEITA O ENVIO ATIVO
               let displayStatus = c.status;
               let corStatus = 'bg-amber-100 text-amber-700';
 
@@ -390,7 +404,6 @@ export default function AutomacoesPage() {
                 displayStatus = 'Agendada';
                 corStatus = 'bg-purple-100 text-purple-700';
               } else if (temTrabalhoPendente) {
-                // Enquanto tem e-mail pra sair, o status é "Enviando", não importa os erros passados
                 displayStatus = 'Enviando...';
                 corStatus = 'bg-cyan-100 text-cyan-700';
               } else if (temFalhas) {
