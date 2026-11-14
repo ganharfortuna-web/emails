@@ -40,7 +40,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(30); // ✅ Aumentado para 30
+        .limit(10); // ✅ Lote reduzido para 10
       return data || [];
     });
 
@@ -54,11 +54,10 @@ export const processarFilaEmails = inngest.createFunction(
       return "Fila vazia. Campanha finalizada.";
     }
 
-    // ✅ AQUI ESTÁ O SEGREDO DA VELOCIDADE: pool: true
     const transporter = nodemailer.createTransport({
-      pool: true, // Reutiliza a conexão
-      maxConnections: 5, // Até 5 conexões simultâneas
-      maxMessages: 100, // Envia até 100 e-mails por conexão antes de reciclar
+      pool: true, 
+      maxConnections: 2, // ✅ Máximo de 2 conexões simultâneas
+      maxMessages: 50, 
       host: conta.host, 
       port: Number(conta.port), 
       secure: Number(conta.port) === 465,
@@ -98,10 +97,9 @@ export const processarFilaEmails = inngest.createFunction(
     }
 
     if (enviadosComSucesso === 0) {
-      await step.run("pausar-por-erro", async () => {
-        await supabase.from('campanhas').update({ status: 'Pausada' }).eq('id', campanhaId);
-      });
-      return "Lote inteiro falhou. Campanha pausada automaticamente por segurança.";
+      // ✅ Se falhar tudo, ele espera 1 minuto e tenta de novo (não pausa mais de imediato)
+      await step.sleep("esperar-antes-de-pausar", "1m");
+      return "Lote falhou. Tentando novamente...";
     }
 
     const restantes = await step.run("checar-restantes", async () => {
@@ -110,8 +108,8 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      // ✅ Reduzido para 2 segundos apenas para aliviar a Vercel, mas manter a velocidade
-      await step.sleep("aguardar-rate-limit", "2s");
+      // ✅ Espera 10 segundos entre os lotes
+      await step.sleep("aguardar-rate-limit", "10s"); 
       await step.sendEvent("continuar-envio", { name: "campanha/iniciar", data: { campanhaId } });
       return `Lote enviado. Restam ${restantes}.`;
     }
