@@ -24,7 +24,7 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (statusCampanha === 'Pausada') {
-      return "Campanha pausada pelo usuário. Envio interrompido.";
+      return "Campanha pausada. Envio interrompido.";
     }
 
     const conta = await step.run("buscar-smtp", async () => {
@@ -40,7 +40,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(10); // ✅ Lote reduzido para 10
+        .limit(20); // ✅ Lote de 20
       return data || [];
     });
 
@@ -56,8 +56,8 @@ export const processarFilaEmails = inngest.createFunction(
 
     const transporter = nodemailer.createTransport({
       pool: true, 
-      maxConnections: 2, // ✅ Máximo de 2 conexões simultâneas
-      maxMessages: 50, 
+      maxConnections: 3, // ✅ 3 conexões
+      maxMessages: 100, 
       host: conta.host, 
       port: Number(conta.port), 
       secure: Number(conta.port) === 465,
@@ -68,9 +68,8 @@ export const processarFilaEmails = inngest.createFunction(
       socketTimeout: 20000,
     });
 
-    let enviadosComSucesso = 0;
-
     for (const item of lote) {
+      // ✅ O try/catch fica DENTRO do step.run para NUNCA abortar o lote inteiro
       await step.run(`enviar-${item.id}`, async () => {
         try {
           let corpo = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente');
@@ -89,17 +88,12 @@ export const processarFilaEmails = inngest.createFunction(
 
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
-          enviadosComSucesso++;
         } catch (err: any) {
+          // Se der erro, marca como failed e APENAS RETORNA (não trava o loop)
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
+          return; 
         }
       });
-    }
-
-    if (enviadosComSucesso === 0) {
-      // ✅ Se falhar tudo, ele espera 1 minuto e tenta de novo (não pausa mais de imediato)
-      await step.sleep("esperar-antes-de-pausar", "1m");
-      return "Lote falhou. Tentando novamente...";
     }
 
     const restantes = await step.run("checar-restantes", async () => {
@@ -108,8 +102,8 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      // ✅ Espera 10 segundos entre os lotes
-      await step.sleep("aguardar-rate-limit", "10s"); 
+      // ✅ Pausa curta de 2 segundos e continua
+      await step.sleep("aguardar-rate-limit", "2s"); 
       await step.sendEvent("continuar-envio", { name: "campanha/iniciar", data: { campanhaId } });
       return `Lote enviado. Restam ${restantes}.`;
     }

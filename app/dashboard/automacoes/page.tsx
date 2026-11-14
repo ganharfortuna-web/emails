@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, RotateCcw, Stethoscope } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -56,7 +56,6 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
-  const [modalDiagnostico, setModalDiagnostico] = useState<any>(null)
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
@@ -101,44 +100,6 @@ export default function AutomacoesPage() {
       novasStats[String(c.id)] = { total: totalValido || 0, enviados: env.count || 0, pendentes: pend.count || 0, falhados: fail.count || 0, abertos: ab.count || 0, clicados: cli.count || 0 }
     }
     setStats(novasStats)
-  }
-
-  const analisarErros = async (campanha: any) => {
-    const { data: logs } = await supabase.from('bounce_log').select('error_message').eq('campaign_id', campanha.id).limit(50)
-    const { data: filaFalha } = await supabase.from('email_queue').select('error_log').eq('campaign_id', campanha.id).eq('status', 'failed').limit(50)
-
-    if ((!logs || logs.length === 0) && (!filaFalha || filaFalha.length === 0)) {
-      alert("Nenhum log de erro detalhado encontrado.")
-      return
-    }
-
-    const todasMensagens = [...(logs?.map(l => l.error_message) || []), ...(filaFalha?.map(f => f.error_log) || [])].join(' ').toLowerCase()
-
-    let causa = '', solucao = '', tipo = 'desconhecido'
-
-    if (todasMensagens.includes('suprimido') || todasMensagens.includes('descadastrados')) {
-      causa = 'E-mails bloqueados/suprimidos'
-      solucao = 'O sistema pulou e-mails na lista de bloqueio. Use o botão "Limpar Erros" para tirar eles da contagem.'
-      tipo = 'suprimido'
-    } else if (todasMensagens.includes('421') || todasMensagens.includes('429') || todasMensagens.includes('too many') || todasMensagens.includes('exceeded') || todasMensagens.includes('rate')) {
-      causa = 'Limite de Envio Atingido (Rate Limit)'
-      solucao = 'A Mailrelay bloqueou o envio temporário por excesso de requisições. O Inngest vai aguardar e tentar novamente sozinho.'
-      tipo = 'limite'
-    } else if (todasMensagens.includes('auth') || todasMensagens.includes('535') || todasMensagens.includes('530')) {
-      causa = 'Falha de Autenticação no SMTP'
-      solucao = 'A senha ou usuário do SMTP estão incorretos. Vá em Configurações e corrija os dados da Mailrelay.'
-      tipo = 'auth'
-    } else if (todasMensagens.includes('timeout') || todasMensagens.includes('connection') || todasMensagens.includes('econn')) {
-      causa = 'Queda de Conexão com o Servidor'
-      solucao = 'O servidor da Mailrelay demorou para responder. O sistema vai tentar novamente no próximo lote.'
-      tipo = 'conexao'
-    } else {
-      causa = 'Erro Desconhecido no Envio'
-      solucao = 'Pode ser instabilidade. Tente clicar em Disparar novamente.'
-      tipo = 'instabilidade'
-    }
-
-    setModalDiagnostico({ campanha, causa, solucao, tipo })
   }
 
   const limparErros = async (campanhaId: string | number) => {
@@ -260,7 +221,6 @@ export default function AutomacoesPage() {
     setSelecionadas(new Set()); buscarCampanhas()
   }
 
-  // ✅ CORREÇÃO AQUI: O botão retomar agora avisa o Inngest para continuar!
   const alternarPausa = async (campanha: any) => {
     const isPausando = campanha.status !== 'Pausada';
     const novoStatus = isPausando ? 'Pausada' : 'Em Fila';
@@ -268,13 +228,8 @@ export default function AutomacoesPage() {
     await supabase.from('campanhas').update({ status: novoStatus }).eq('id', campanha.id);
     
     if (!isPausando) {
-      // Se acabou de retomar, envia o evento pro Inngest acordar
       try {
-        await fetch('/api/disparo/iniciar', { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({ campanhaId: campanha.id }) 
-        })
+        await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: campanha.id }) })
       } catch(e) { console.error(e) }
     }
 
@@ -444,12 +399,6 @@ export default function AutomacoesPage() {
                             {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Disparar
                           </button>
                         )}
-                        
-                        {st.falhados > 0 && (
-                          <button onClick={() => analisarErros(c)} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded">
-                            <Stethoscope className="size-3"/> Ver Motivo
-                          </button>
-                        )}
 
                         {st.falhados > 0 && (
                           <button onClick={() => limparErros(c.id)} disabled={estaDisparando} className="text-xs font-bold text-red-700 hover:text-red-800 flex items-center gap-1 bg-red-50 px-2 py-1 rounded">
@@ -471,35 +420,6 @@ export default function AutomacoesPage() {
           </div>
         </div>
       </div>
-
-      {/* MODAIS */}
-      {modalDiagnostico && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className={`p-6 border-b flex justify-between items-center ${
-              modalDiagnostico.tipo === 'limite' ? 'bg-amber-50 text-amber-900' : 
-              modalDiagnostico.tipo === 'auth' ? 'bg-red-50 text-red-900' : 
-              'bg-indigo-50 text-indigo-900'
-            }`}>
-              <h2 className="text-xl font-black flex items-center gap-2"><Stethoscope className="size-5" /> Diagnóstico da Campanha</h2>
-              <button onClick={() => setModalDiagnostico(null)} className="opacity-50 hover:opacity-100"><X className="size-5" /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Problema Detectado</span>
-                <p className="text-lg font-black text-slate-800">{modalDiagnostico.causa}</p>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">O que fazer?</span>
-                <p className="text-sm text-slate-700 leading-relaxed">{modalDiagnostico.solucao}</p>
-              </div>
-            </div>
-            <div className="p-4 border-t bg-slate-50 flex justify-end">
-              <button onClick={() => setModalDiagnostico(null)} className="px-6 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl">Entendi</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
