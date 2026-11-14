@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, RotateCcw } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, RotateCcw, Stethoscope, ShieldAlert } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -56,6 +56,7 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
+  const [modalDiagnostico, setModalDiagnostico] = useState<any>(null) // ✅ Novo modal de diagnóstico
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
@@ -83,11 +84,10 @@ export default function AutomacoesPage() {
   const carregarStats = async () => {
     const novasStats: Record<string, StatsItem> = {}
     for (const c of campanhas) {
-      // Agora o sistema busca o TOTAL apenas dos que não foram suprimidos pelo sistema
       const { count: totalValido } = await supabase.from('email_queue')
         .select('*', { count: 'exact', head: true })
         .eq('campaign_id', c.id)
-        .neq('status', 'suppressed'); // Ignora os suprimidos na contagem
+        .neq('status', 'suppressed');
 
       const [env, pend, fail, ab, cli] = await Promise.all([
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'sent'),
@@ -97,19 +97,86 @@ export default function AutomacoesPage() {
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).not('clicked_at', 'is', null)
       ])
 
-      // O Total agora é a soma dos enviados + falhados (excluindo os suprimidos do banco)
-      const total = (env.count || 0) + (fail.count || 0) + (pend.count || 0);
-
-      novasStats[String(c.id)] = { 
-        total: total, 
-        enviados: env.count || 0, 
-        pendentes: pend.count || 0, 
-        falhados: fail.count || 0, 
-        abertos: ab.count || 0, 
-        clicados: cli.count || 0 
-      }
+      novasStats[String(c.id)] = { total: totalValido || 0, enviados: env.count || 0, pendentes: pend.count || 0, falhados: fail.count || 0, abertos: ab.count || 0, clicados: cli.count || 0 }
     }
     setStats(novasStats)
+  }
+
+  // ✅ FUNÇÃO PARA ANALISAR OS ERROS
+  const analisarErros = async (campanha: any) => {
+    const { data: logs } = await supabase
+      .from('bounce_log')
+      .select('bounce_type, error_message')
+      .eq('campaign_id', campanha.id)
+      .limit(100)
+
+    const { data: filaFalha } = await supabase
+      .from('email_queue')
+      .select('error_log')
+      .eq('campaign_id', campanha.id)
+      .eq('status', 'failed')
+      .limit(100)
+
+    if ((!logs || logs.length === 0) && (!filaFalha || filaFalha.length === 0)) {
+      alert("Nenhum log de erro detalhado encontrado para esta campanha.")
+      return
+    }
+
+    // Analisa as mensagens de erro para dar um veredito
+    const todasMensagens = [
+      ...(logs?.map(l => l.error_message) || []),
+      ...(filaFalha?.map(f => f.error_log) || [])
+    ].join(' ').toLowerCase()
+
+    let causa = ''
+    let solucao = ''
+    let tipo = 'desconhecido'
+
+    if (todasMensagens.includes('suprimido') || todasMensagens.includes('descadastrados')) {
+      causa = 'E-mails bloqueados/suprimidos'
+      solucao = 'O sistema pulou e-mails que já estavam na lista de bloqueio (Bounces). Isso é normal e protege sua conta. Você pode limpar esses erros.'
+      tipo = 'suprimido'
+    } else if (todasMensagens.includes('421') || todasMensagens.includes('429') || todasMensagens.includes('too many') || todasMensagens.includes('exceeded')) {
+      causa = 'Limite de Envio Atingido (Rate Limit)'
+      solucao = 'A Mailrelay bloqueou o envio temporariamente porque você fez muitas requisições em pouco tempo. O Inngest vai tentar novamente automaticamente ou aguarde algumas horas.'
+      tipo = 'limite'
+    } else if (todasMensagens.includes('auth') || todasMensagens.includes('535') || todasMensagens.includes('530') || todasMensagens.includes('invalid login')) {
+      causa = 'Falha de Autenticação no SMTP'
+      solucao = 'A senha do seu SMTP pode ter expirado ou está incorreta. Vá em Configurações e atualize a senha da Mailrelay.'
+      tipo = 'auth'
+    } else if (todasMensagens.includes('550') || todasMensagens.includes('user unknown') || todasMensagens.includes('does not exist') || todasMensagens.includes('mailbox not found')) {
+      causa = 'E-mails Inválidos (Hard Bounce)'
+      solucao = 'A lista "Falta abrir" contém endereços de e-mail que não existem mais. Eles foram bloqueados automaticamente.'
+      tipo = 'invalido'
+    } else {
+      causa = 'Erro de Conexão ou Instabilidade'
+      solucao = 'O servidor SMTP caiu ou demorou para responder. Tente clicar em "Disparar" novamente para reprocessar.'
+      tipo = 'instabilidade'
+    }
+
+    setModalDiagnostico({ campanha, causa, solucao, tipo })
+  }
+
+  const limparErros = async (campanhaId: string | number) => {
+    if (!confirm("⚠️ Tem certeza que deseja apagar todos os e-mails com ERRO desta campanha?\n\nEles não poderão ser reenviados novamente, mas continuarão na Lista de Supressão para proteger o sistema.")) return
+
+    setProcessandoId(String(campanhaId))
+    try {
+      const { error } = await supabase
+        .from('email_queue')
+        .delete()
+        .eq('campaign_id', campanhaId)
+        .in('status', ['failed', 'suppressed'])
+
+      if (error) throw error
+      
+      alert("✅ Erros limpos com sucesso!")
+      buscarCampanhas(true)
+      carregarStats()
+    } catch (err: any) {
+      alert("Erro ao limpar: " + err.message)
+    }
+    setProcessandoId(null)
   }
 
   const dispararCampanha = async (campanhaId: string | number) => {
@@ -118,7 +185,7 @@ export default function AutomacoesPage() {
     await supabase.from('email_queue')
       .update({ status: 'pending', retry_count: 0, next_retry_at: null })
       .eq('campaign_id', campanhaId)
-      .eq('status', 'failed'); // Só reseta os que realmente falharam
+      .eq('status', 'failed');
 
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
     buscarCampanhas(true); carregarStats()
@@ -134,7 +201,6 @@ export default function AutomacoesPage() {
       }
     } catch (err) { console.log("Inngest falhou.") }
 
-    // Fallback manual
     let continuar = true, falhas = 0
     while (continuar) {
       try {
@@ -158,7 +224,7 @@ export default function AutomacoesPage() {
   
   const deletarCampanhas = async (ids: string[]) => {
     if (ids.length === 0) return
-    if (!confirm(`Apagar ${ids.length} campanha(s)?`)) return
+    if (!confirm(`Apagar ${ids.length} campanha(s) e todo o seu histórico?`)) return
     await supabase.from('email_queue').delete().in('campaign_id', ids)
     await supabase.from('campanhas').delete().in('id', ids)
     setSelecionadas(new Set()); buscarCampanhas()
@@ -340,7 +406,20 @@ export default function AutomacoesPage() {
                           </button>
                         )}
                         
-                        {temTrabalhoPendente && (
+                        {/* ✅ BOTÃO ANALISAR ERROS */}
+                        {st.falhados > 0 && (
+                          <button onClick={() => analisarErros(c)} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded">
+                            <Stethoscope className="size-3"/> Ver Motivo
+                          </button>
+                        )}
+
+                        {st.falhados > 0 && (
+                          <button onClick={() => limparErros(c.id)} disabled={estaDisparando} className="text-xs font-bold text-red-700 hover:text-red-800 flex items-center gap-1 bg-red-50 px-2 py-1 rounded">
+                            {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Trash2 className="size-3"/>} Limpar Erros
+                          </button>
+                        )}
+                        
+                        {st.pendentes > 0 && c.status !== 'Enviada' && (
                           <button onClick={() => alternarPausa(c)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1">
                             {c.status === 'Pausada' ? <Play className="size-3" /> : <Pause className="size-3" />} {c.status === 'Pausada' ? 'Retomar' : 'Pausar'}
                           </button>
@@ -355,6 +434,36 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
+      {/* ✅ MODAL DE DIAGNÓSTICO DE ERROS */}
+      {modalDiagnostico && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className={`p-6 border-b flex justify-between items-center ${
+              modalDiagnostico.tipo === 'limite' ? 'bg-amber-50 text-amber-900' : 
+              modalDiagnostico.tipo === 'auth' ? 'bg-red-50 text-red-900' : 
+              'bg-indigo-50 text-indigo-900'
+            }`}>
+              <h2 className="text-xl font-black flex items-center gap-2"><Stethoscope className="size-5" /> Diagnóstico da Campanha</h2>
+              <button onClick={() => setModalDiagnostico(null)} className="opacity-50 hover:opacity-100"><X className="size-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Problema Detectado</span>
+                <p className="text-lg font-black text-slate-800">{modalDiagnostico.causa}</p>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">O que fazer?</span>
+                <p className="text-sm text-slate-700 leading-relaxed">{modalDiagnostico.solucao}</p>
+              </div>
+            </div>
+            <div className="p-4 border-t bg-slate-50 flex justify-end">
+              <button onClick={() => setModalDiagnostico(null)} className="px-6 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl">Entendi</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAIS (DESEMPENHO E REENVIO) */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
