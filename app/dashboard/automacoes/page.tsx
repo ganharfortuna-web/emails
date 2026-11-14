@@ -55,7 +55,7 @@ export default function AutomacoesPage() {
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
-  const [modalDetalhes, setModalDetalhes] = useState<any>(null) // ✅ Estado do modal restaurado
+  const [modalDetalhes, setModalDetalhes] = useState<any>(null)
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
@@ -96,10 +96,11 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
+  // ✅ BOTÃO DISPARAR INTELIGENTE (Tenta Inngest, se falhar faz o loop manual)
   const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     
-    // Força todos os não enviados a voltarem para pending
+    // Reseta os e-mails com erro/falha para pending
     await supabase.from('email_queue')
       .update({ status: 'pending', retry_count: 0, next_retry_at: null })
       .eq('campaign_id', campanhaId)
@@ -108,6 +109,25 @@ export default function AutomacoesPage() {
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
     buscarCampanhas(true); carregarStats()
 
+    try {
+      // Tenta disparar via Inngest
+      const r = await fetch('/api/disparo/iniciar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campanhaId }),
+      })
+      
+      if (r.ok) {
+        alert("🚀 Envio automático iniciado em background! O Inngest vai processar a fila. Você pode fechar esta aba.")
+        setProcessandoId(null)
+        buscarCampanhas(true); carregarStats()
+        return
+      }
+    } catch (err) {
+      console.log("Inngest falhou, tentando manual...", err)
+    }
+
+    // Fallback: Loop Manual (Caso o Inngest não esteja respondendo)
+    alert("Inngest indisponível. Iniciando envio manual (mantenha a aba aberta).")
     let continuar = true
     let falhas = 0
 
@@ -142,7 +162,7 @@ export default function AutomacoesPage() {
 
     setProcessandoId(null)
     buscarCampanhas(true); carregarStats()
-    alert(`✅ Envio finalizado.`)
+    alert(`✅ Envio manual finalizado.`)
   }
 
   const toggleSelecionada = (id: string) => { const novo = new Set(selecionadas); novo.has(id) ? novo.delete(id) : novo.add(id); setSelecionadas(novo) }
@@ -229,9 +249,12 @@ export default function AutomacoesPage() {
       buscarCampanhas(); 
       
       if (!scheduledAt) {
+        // Tenta disparar automaticamente pelo Inngest
         try {
           await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) })
-        } catch(e) { console.log("Inngest falhou, use o botão disparar manual.") }
+        } catch(e) { 
+          console.log("Inngest falhou, use o botão disparar manual.") 
+        }
       }
     } catch (err) { alert("Erro de conexão."); setEnviando(false) }
   }
@@ -341,7 +364,7 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* ✅ MODAL DE DETALHES RESTAURADO */}
+      {/* MODAL DE DETALHES */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
@@ -387,7 +410,7 @@ export default function AutomacoesPage() {
         )
       })()}
 
-      {/* ✅ MODAL DE REENVIO RESTAURADO */}
+      {/* MODAL DE REENVIO */}
       {modalReenvio && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
