@@ -36,14 +36,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Campanha não encontrada.' }, { status: 404 });
     }
 
-    // 3. Monta o Payload (AQUI VOCÊ AJUSTA CONFORME A API QUE VOCÊ ESTÁ USANDO)
-    // O exemplo abaixo é um padrão genérico. Se for Mailrelay, mude para o formato deles.
+    // 3. Monta o Payload no formato da Mailrelay
+    // ⚠️ ATENÇÃO: O 'sender_id' geralmente é um número. Se der erro, você precisará colocar o ID numérico do remetente da sua conta Mailrelay.
     const payload = {
       subject: campanha.assunto,
-      html_content: campanha.mensagem,
-      sender_name: "Sua Empresa",
-      sender_email: "contato@suaempresa.com",
-      list_id: apiConfig.list_id // Puxa o ID da lista que você salvou no painel
+      html: campanha.mensagem,
+      sender_id: 1, // Substitua pelo ID numérico do remetente na Mailrelay, se necessário
+      target: 'groups',
+      group_ids: apiConfig.list_id ? [Number(apiConfig.list_id)] : [], // Converte o ID da lista para número
+      track_opens: true,
+      track_clicks: true
     };
 
     // 4. Dispara para a API externa usando as credenciais do banco
@@ -51,7 +53,7 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiConfig.api_key}`, // Alguns usam 'X-AUTH-TOKEN', ajuste se necessário
+        'X-AUTH-TOKEN': apiConfig.api_key, // ✅ CORREÇÃO AQUI: Mailrelay usa X-AUTH-TOKEN
       },
       body: JSON.stringify(payload),
     });
@@ -62,11 +64,30 @@ export async function POST(request: Request) {
       throw new Error(`Erro da API: ${apiRes.status} - ${JSON.stringify(apiData)}`);
     }
 
-    // 5. Atualiza o status no seu banco para não tentar enviar via SMTP novamente
+    const mailrelayCampaignId = apiData.id;
+
+    // 5. Dispara a campanha imediatamente (Comando de envio da Mailrelay)
+    if (mailrelayCampaignId) {
+      const urlBase = apiConfig.api_url.replace('/campaigns', ''); // Pega a URL base
+      const sendRes = await fetch(`${urlBase}/campaigns/${mailrelayCampaignId}/send_all`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-AUTH-TOKEN': apiConfig.api_key,
+        },
+      });
+
+      if (!sendRes.ok) {
+        const sendError = await sendRes.json().catch(() => ({}));
+        throw new Error(`Criada, mas erro ao disparar: ${sendRes.status} - ${JSON.stringify(sendError)}`);
+      }
+    }
+
+    // 6. Atualiza o status no seu banco para não tentar enviar via SMTP novamente
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId);
     await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('campaign_id', campanhaId).eq('status', 'pending');
 
-    return NextResponse.json({ success: true, message: 'Campanha enviada para a API com sucesso.', api_response: apiData });
+    return NextResponse.json({ success: true, message: 'Campanha enviada para a Mailrelay com sucesso!', api_response: apiData });
 
   } catch (error: any) {
     console.error('Erro na API do provedor:', error);
