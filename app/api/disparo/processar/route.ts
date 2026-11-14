@@ -7,7 +7,7 @@ import { prepararHtmlEmail } from '@/lib/email-html'
 export const dynamic = 'force-dynamic'
 
 // Lote seguro para não estourar o tempo da Vercel
-const BATCH_SIZE = 30
+const BATCH_SIZE = 9
 
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
