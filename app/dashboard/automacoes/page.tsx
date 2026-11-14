@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, RotateCcw, Stethoscope, ShieldAlert } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, RotateCcw, Stethoscope } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -56,11 +56,12 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
-  const [modalDiagnostico, setModalDiagnostico] = useState<any>(null) // ✅ Novo modal de diagnóstico
+  const [modalDiagnostico, setModalDiagnostico] = useState<any>(null)
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
   const [msgSucesso, setMsgSucesso] = useState('')
+  const [processandoReenvio, setProcessandoReenvio] = useState(false)
 
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
@@ -102,55 +103,38 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  // ✅ FUNÇÃO PARA ANALISAR OS ERROS
   const analisarErros = async (campanha: any) => {
-    const { data: logs } = await supabase
-      .from('bounce_log')
-      .select('bounce_type, error_message')
-      .eq('campaign_id', campanha.id)
-      .limit(100)
-
-    const { data: filaFalha } = await supabase
-      .from('email_queue')
-      .select('error_log')
-      .eq('campaign_id', campanha.id)
-      .eq('status', 'failed')
-      .limit(100)
+    const { data: logs } = await supabase.from('bounce_log').select('error_message').eq('campaign_id', campanha.id).limit(50)
+    const { data: filaFalha } = await supabase.from('email_queue').select('error_log').eq('campaign_id', campanha.id).eq('status', 'failed').limit(50)
 
     if ((!logs || logs.length === 0) && (!filaFalha || filaFalha.length === 0)) {
-      alert("Nenhum log de erro detalhado encontrado para esta campanha.")
+      alert("Nenhum log de erro detalhado encontrado.")
       return
     }
 
-    // Analisa as mensagens de erro para dar um veredito
-    const todasMensagens = [
-      ...(logs?.map(l => l.error_message) || []),
-      ...(filaFalha?.map(f => f.error_log) || [])
-    ].join(' ').toLowerCase()
+    const todasMensagens = [...(logs?.map(l => l.error_message) || []), ...(filaFalha?.map(f => f.error_log) || [])].join(' ').toLowerCase()
 
-    let causa = ''
-    let solucao = ''
-    let tipo = 'desconhecido'
+    let causa = '', solucao = '', tipo = 'desconhecido'
 
     if (todasMensagens.includes('suprimido') || todasMensagens.includes('descadastrados')) {
       causa = 'E-mails bloqueados/suprimidos'
-      solucao = 'O sistema pulou e-mails que já estavam na lista de bloqueio (Bounces). Isso é normal e protege sua conta. Você pode limpar esses erros.'
+      solucao = 'O sistema pulou e-mails na lista de bloqueio. Use o botão "Limpar Erros" para tirar eles da contagem.'
       tipo = 'suprimido'
-    } else if (todasMensagens.includes('421') || todasMensagens.includes('429') || todasMensagens.includes('too many') || todasMensagens.includes('exceeded')) {
+    } else if (todasMensagens.includes('421') || todasMensagens.includes('429') || todasMensagens.includes('too many') || todasMensagens.includes('exceeded') || todasMensagens.includes('rate')) {
       causa = 'Limite de Envio Atingido (Rate Limit)'
-      solucao = 'A Mailrelay bloqueou o envio temporariamente porque você fez muitas requisições em pouco tempo. O Inngest vai tentar novamente automaticamente ou aguarde algumas horas.'
+      solucao = 'A Mailrelay bloqueou o envio temporário por excesso de requisições. O Inngest vai aguardar e tentar novamente sozinho.'
       tipo = 'limite'
-    } else if (todasMensagens.includes('auth') || todasMensagens.includes('535') || todasMensagens.includes('530') || todasMensagens.includes('invalid login')) {
+    } else if (todasMensagens.includes('auth') || todasMensagens.includes('535') || todasMensagens.includes('530')) {
       causa = 'Falha de Autenticação no SMTP'
-      solucao = 'A senha do seu SMTP pode ter expirado ou está incorreta. Vá em Configurações e atualize a senha da Mailrelay.'
+      solucao = 'A senha ou usuário do SMTP estão incorretos. Vá em Configurações e corrija os dados da Mailrelay.'
       tipo = 'auth'
-    } else if (todasMensagens.includes('550') || todasMensagens.includes('user unknown') || todasMensagens.includes('does not exist') || todasMensagens.includes('mailbox not found')) {
-      causa = 'E-mails Inválidos (Hard Bounce)'
-      solucao = 'A lista "Falta abrir" contém endereços de e-mail que não existem mais. Eles foram bloqueados automaticamente.'
-      tipo = 'invalido'
+    } else if (todasMensagens.includes('timeout') || todasMensagens.includes('connection') || todasMensagens.includes('econn')) {
+      causa = 'Queda de Conexão com o Servidor'
+      solucao = 'O servidor da Mailrelay demorou para responder. O sistema vai tentar novamente no próximo lote.'
+      tipo = 'conexao'
     } else {
-      causa = 'Erro de Conexão ou Instabilidade'
-      solucao = 'O servidor SMTP caiu ou demorou para responder. Tente clicar em "Disparar" novamente para reprocessar.'
+      causa = 'Erro Desconhecido no Envio'
+      solucao = 'Pode ser instabilidade. Tente clicar em Disparar novamente.'
       tipo = 'instabilidade'
     }
 
@@ -158,45 +142,27 @@ export default function AutomacoesPage() {
   }
 
   const limparErros = async (campanhaId: string | number) => {
-    if (!confirm("⚠️ Tem certeza que deseja apagar todos os e-mails com ERRO desta campanha?\n\nEles não poderão ser reenviados novamente, mas continuarão na Lista de Supressão para proteger o sistema.")) return
-
+    if (!confirm("⚠️ Apagar todos os e-mails com ERRO desta campanha?")) return
     setProcessandoId(String(campanhaId))
     try {
-      const { error } = await supabase
-        .from('email_queue')
-        .delete()
-        .eq('campaign_id', campanhaId)
-        .in('status', ['failed', 'suppressed'])
-
-      if (error) throw error
-      
-      alert("✅ Erros limpos com sucesso!")
-      buscarCampanhas(true)
-      carregarStats()
-    } catch (err: any) {
-      alert("Erro ao limpar: " + err.message)
-    }
+      await supabase.from('email_queue').delete().eq('campaign_id', campanhaId).in('status', ['failed', 'suppressed'])
+      alert("✅ Erros limpos!")
+      buscarCampanhas(true); carregarStats()
+    } catch (err: any) { alert("Erro: " + err.message) }
     setProcessandoId(null)
   }
 
   const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     
-    await supabase.from('email_queue')
-      .update({ status: 'pending', retry_count: 0, next_retry_at: null })
-      .eq('campaign_id', campanhaId)
-      .eq('status', 'failed');
-
+    await supabase.from('email_queue').update({ status: 'pending', retry_count: 0, next_retry_at: null }).eq('campaign_id', campanhaId).eq('status', 'failed');
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
     buscarCampanhas(true); carregarStats()
 
     try {
-      const r = await fetch('/api/disparo/iniciar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campanhaId }),
-      })
+      const r = await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) })
       if (r.ok) {
-        alert("🚀 Envio automático iniciado em background! O Inngest vai processar a fila.")
+        alert("🚀 Envio iniciado em background! O Inngest está processando a fila.")
         setProcessandoId(null); buscarCampanhas(true); carregarStats(); return
       }
     } catch (err) { console.log("Inngest falhou.") }
@@ -204,19 +170,121 @@ export default function AutomacoesPage() {
     let continuar = true, falhas = 0
     while (continuar) {
       try {
-        const r = await fetch('/api/disparo/processar', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ campanhaId }),
-        })
-        if (r.status === 504 || r.status === 502) { falhas++; if (falhas > 10) break; await new Promise(res => setTimeout(res, 3000)); continue }
-        if (!r.ok) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 3000)); continue }
+        const r = await fetch('/api/disparo/processar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) })
+        if (r.status === 504 || r.status === 502) { falhas++; if (falhas > 10) break; await new Promise(res => setTimeout(res, 5000)); continue }
+        if (!r.ok) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 5000)); continue }
         const j = await r.json()
         falhas = 0 
         if (j.done || j.restantes === 0) continuar = false
-        else await new Promise(res => setTimeout(res, 1500))
-      } catch (err) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 3000)) }
+        else await new Promise(res => setTimeout(res, 3000))
+      } catch (err) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 5000)) }
     }
     setProcessandoId(null); buscarCampanhas(true); carregarStats()
+  }
+
+  // ✅ ABRIR MODAL DE REENVIO (Contagem Exata via Banco)
+  const abrirModalReenvio = async (campanha: any) => {
+    // Conta exata no banco, sem limite de 1000 linhas
+    const { count: naoAbriram, error } = await supabase
+      .from('email_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('campaign_id', campanha.id)
+      .eq('status', 'sent')
+      .is('opened_at', null)
+
+    if (error) {
+      alert("Erro ao contar contatos: " + error.message)
+      return
+    }
+
+    if (!naoAbriram || naoAbriram === 0) { 
+      alert('🎉 Todos já abriram ou não há e-mails enviados suficientes nesta campanha!'); 
+      return 
+    }
+    
+    setModalReenvio({ ...campanha, totalNaoAbriram: naoAbriram }); 
+    setNovoTitulo(`[REENVIO] ${campanha.assunto}`)
+  }
+
+  // ✅ CONFIRMAR REENVIO (Busca paginada para contornar o limite de 1000)
+  const confirmarReenvio = async () => {
+    if (!modalReenvio) return
+    setProcessandoReenvio(true)
+    
+    let todosNaoAbriram: any[] = []
+    let page = 0
+    const pageSize = 1000
+    let hasMore = true
+
+    try {
+      // 1. Busca paginada de todos que não abriram
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('email_queue')
+          .select('recipient_email, recipient_name, subject, body')
+          .eq('campaign_id', modalReenvio.id)
+          .eq('status', 'sent')
+          .is('opened_at', null)
+          .range(page * pageSize, (page + 1) * pageSize - 1)
+
+        if (error) throw error
+
+        if (data && data.length > 0) {
+          todosNaoAbriram = [...todosNaoAbriram, ...data]
+          if (data.length < pageSize) hasMore = false
+          else page++
+        } else {
+          hasMore = false
+        }
+      }
+
+      if (todosNaoAbriram.length === 0) { 
+        alert('🎉 Todos já abriram!'); 
+        setModalReenvio(null); 
+        setProcessandoReenvio(false); 
+        return 
+      }
+
+      // 2. Cria a nova campanha
+      const { data: nova, error: errCampanha } = await supabase.from('campanhas').insert([{ 
+        lista_id: modalReenvio.lista_id, 
+        assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`, 
+        mensagem: todosNaoAbriram[0].body, 
+        status: 'Em Fila' 
+      }]).select().single()
+      
+      if (errCampanha || !nova) { 
+        alert('Erro ao criar campanha de reenvio.'); 
+        setProcessandoReenvio(false); 
+        return 
+      }
+
+      // 3. Insere a nova fila em blocos de 500 para não estourar a memória da Vercel
+      const fila = todosNaoAbriram.map(o => ({ 
+        campaign_id: nova.id, 
+        recipient_email: o.recipient_email, 
+        recipient_name: o.recipient_name, 
+        subject: novoTitulo || `[REENVIO] ${o.subject}`, 
+        body: o.body, 
+        status: 'pending' 
+      }))
+
+      for (let i = 0; i < fila.length; i += 500) {
+        const bloco = fila.slice(i, i + 500)
+        const { error: errFila } = await supabase.from('email_queue').insert(bloco)
+        if (errFila) throw errFila
+      }
+
+      setModalReenvio(null); 
+      setNovoTitulo(''); 
+      setProcessandoReenvio(false);
+      buscarCampanhas(); 
+      dispararCampanha(nova.id)
+      
+    } catch (err: any) {
+      alert("Erro ao preparar reenvio: " + err.message)
+      setProcessandoReenvio(false)
+    }
   }
 
   const toggleSelecionada = (id: string) => { const novo = new Set(selecionadas); novo.has(id) ? novo.delete(id) : novo.add(id); setSelecionadas(novo) }
@@ -243,28 +311,6 @@ export default function AutomacoesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const abrirModalReenvio = async (campanha: any) => {
-    const { data } = await supabase.from('email_queue').select('id, opened_at').eq('campaign_id', campanha.id).eq('status', 'sent')
-    if (!data || data.length === 0) { alert('⚠️ Campanha ainda não enviada.'); return }
-    const naoAbriram = data.filter(d => !d.opened_at).length
-    if (naoAbriram === 0) { alert('🎉 Todos já abriram!'); return }
-    setModalReenvio({ ...campanha, totalNaoAbriram: naoAbriram }); setNovoTitulo(`[REENVIO] ${campanha.assunto}`)
-  }
-
-  const confirmarReenvio = async () => {
-    if (!modalReenvio) return
-    const { data: originais } = await supabase.from('email_queue').select('recipient_email, recipient_name, subject, body, opened_at').eq('campaign_id', modalReenvio.id).eq('status', 'sent')
-    const naoAbriram = (originais || []).filter(o => !o.opened_at)
-    if (naoAbriram.length === 0) { alert('🎉 Todos já abriram!'); setModalReenvio(null); return }
-
-    const { data: nova, error } = await supabase.from('campanhas').insert([{ lista_id: modalReenvio.lista_id, assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`, mensagem: naoAbriram[0].body, status: 'Em Fila' }]).select().single()
-    if (error || !nova) { alert('Erro ao criar campanha de reenvio.'); return }
-
-    const fila = naoAbriram.map(o => ({ campaign_id: nova.id, recipient_email: o.recipient_email, recipient_name: o.recipient_name, subject: novoTitulo || `[REENVIO] ${o.subject}`, body: o.body, status: 'pending' }))
-    await supabase.from('email_queue').insert(fila)
-    setModalReenvio(null); setNovoTitulo(''); buscarCampanhas(); dispararCampanha(nova.id)
-  }
-
   const criarSegmento = async () => {
     if (!modalDetalhes || !nomeNovaLista.trim()) { alert('Digite um nome.'); return }
     setCriandoLista(true); setMsgSucesso('')
@@ -273,8 +319,9 @@ export default function AutomacoesPage() {
       if (tipoSegmento === 'abridores') query = query.not('opened_at', 'is', null)
       else if (tipoSegmento === 'clicadores') query = query.not('clicked_at', 'is', null)
       else if (tipoSegmento === 'nao_abriram') query = query.eq('status', 'sent').is('opened_at', null)
+      
       const { data: itens } = await query
-      if (!itens || itens.length === 0) { alert('Nenhum contato.'); setCriandoLista(false); return }
+      if (!itens || itens.length === 0) { alert('Nenhum contato encontrado neste segmento.'); setCriandoLista(false); return }
       
       const { data: novaLista } = await supabase.from('listas').insert([{ nome: nomeNovaLista.trim() }]).select().single()
       if (!novaLista) { setCriandoLista(false); return }
@@ -389,7 +436,9 @@ export default function AutomacoesPage() {
                         </span>
                       </div>
                       <p className="font-bold text-slate-800 text-sm truncate">{c.assunto}</p>
-                      <p className="text-xs text-slate-500 mb-2">Lista: {c.listas?.nome}</p>
+                      <p className="text-xs text-slate-500 mb-1">Lista: {c.listas?.nome}</p>
+                      <p className="text-[10px] text-slate-400 mb-3 flex items-center gap-1"><Clock className="size-3"/> {new Date(c.created_at).toLocaleString('pt-BR')}</p>
+                      
                       <div className="flex gap-3 text-xs font-bold mb-3">
                         <span className="text-blue-600 flex items-center gap-1"><Send className="size-3"/> {st.enviados}/{st.total}</span>
                         <span className="text-emerald-600 flex items-center gap-1"><Eye className="size-3"/> {st.abertos}</span>
@@ -406,7 +455,6 @@ export default function AutomacoesPage() {
                           </button>
                         )}
                         
-                        {/* ✅ BOTÃO ANALISAR ERROS */}
                         {st.falhados > 0 && (
                           <button onClick={() => analisarErros(c)} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded">
                             <Stethoscope className="size-3"/> Ver Motivo
@@ -419,7 +467,7 @@ export default function AutomacoesPage() {
                           </button>
                         )}
                         
-                        {st.pendentes > 0 && c.status !== 'Enviada' && (
+                        {st.pendentes > 0 && (
                           <button onClick={() => alternarPausa(c)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1">
                             {c.status === 'Pausada' ? <Play className="size-3" /> : <Pause className="size-3" />} {c.status === 'Pausada' ? 'Retomar' : 'Pausar'}
                           </button>
@@ -434,7 +482,7 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* ✅ MODAL DE DIAGNÓSTICO DE ERROS */}
+      {/* MODAL DE DIAGNÓSTICO */}
       {modalDiagnostico && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
@@ -520,8 +568,10 @@ export default function AutomacoesPage() {
               <div><label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Pencil className="size-4 text-slate-500" /> Novo Assunto</label><input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)} className="w-full p-3 border rounded-xl text-slate-800" /></div>
             </div>
             <div className="p-6 border-t bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => setModalReenvio(null)} className="px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl">Cancelar</button>
-              <button onClick={confirmarReenvio} className="px-6 py-2.5 font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl flex items-center gap-2"><RotateCcw className="size-4" /> Reenviar agora</button>
+              <button onClick={() => setModalReenvio(null)} disabled={processandoReenvio} className="px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl disabled:opacity-50">Cancelar</button>
+              <button onClick={confirmarReenvio} disabled={processandoReenvio} className="px-6 py-2.5 font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl flex items-center gap-2 disabled:opacity-50">
+                {processandoReenvio ? <><Loader2 className="size-4 animate-spin" /> Processando...</> : <><RotateCcw className="size-4" /> Reenviar agora</>}
+              </button>
             </div>
           </div>
         </div>

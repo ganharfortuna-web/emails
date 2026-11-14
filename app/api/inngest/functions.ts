@@ -7,11 +7,10 @@ import { prepararHtmlEmail } from "@/lib/email-html";
 export const processarFilaEmails = inngest.createFunction(
   { 
     id: "processar-fila-emails", 
-    concurrency: 1,
-    // ✅ O gatilho agora faz parte do objeto de configuração
+    concurrency: 1, // Impede que dois processos rodem ao mesmo tempo
     triggers: [{ event: "campanha/iniciar" }] 
   },
-  async ({ event, step }) => { // ✅ Apenas dois argumentos agora
+  async ({ event, step }) => {
     const { campanhaId } = event.data;
     
     const supabase = createClient(
@@ -20,14 +19,12 @@ export const processarFilaEmails = inngest.createFunction(
     );
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
-    // 1. Busca a conta SMTP
     const conta = await step.run("buscar-smtp", async () => {
       const { data } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single();
       if (!data) throw new Error("Nenhuma conta SMTP ativa configurada.");
       return data;
     });
 
-    // 2. Busca o próximo lote de e-mails pendentes
     const lote = await step.run("buscar-lote", async () => {
       const { data } = await supabase
         .from('email_queue')
@@ -35,11 +32,10 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(20);
+        .limit(20); // 20 e-mails por lote para não sobrecarregar
       return data || [];
     });
 
-    // Se não há mais e-mails, finaliza a campanha
     if (lote.length === 0) {
       await step.run("finalizar-campanha", async () => {
         const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', campanhaId).eq('status', 'pending');
@@ -50,14 +46,12 @@ export const processarFilaEmails = inngest.createFunction(
       return "Fila vazia. Campanha finalizada.";
     }
 
-    // 3. Configura o transportador SMTP
     const transporter = nodemailer.createTransport({
       host: conta.host, port: Number(conta.port), secure: Number(conta.port) === 465,
       auth: { user: conta.email, pass: conta.app_password }, tls: { rejectUnauthorized: false },
       connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
     });
 
-    // 4. Envia os e-mails
     for (const item of lote) {
       await step.run(`enviar-${item.id}`, async () => {
         try {
@@ -78,31 +72,38 @@ export const processarFilaEmails = inngest.createFunction(
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
         } catch (err: any) {
-          await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
-          throw err;
+          // Se der erro de rate limit, joga de volta para pending e falha o lote
+          const isRateLimit = err.message?.includes('421') || err.message?.includes('429') || err.message?.includes('too many');
+          
+          if (isRateLimit) {
+            throw new Error("Rate Limit atingido. Vou pausar e tentar novamente."); // Força o Inngest a falhar a step e tentar de novo
+          } else {
+            await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
+          }
         }
       });
     }
 
-    // 5. Verifica se ainda há e-mails pendentes e se auto-dispara novamente
     const restantes = await step.run("checar-restantes", async () => {
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', campanhaId).eq('status', 'pending');
       return count || 0;
     });
 
     if (restantes > 0) {
+      // ✅ O SEGREDO: Espera 30 segundos antes de chamar o próximo lote
+      await step.sleep("aguardar-rate-limit", "30s");
+      
       await step.sendEvent("continuar-envio", {
         name: "campanha/iniciar",
         data: { campanhaId },
       });
-      return `Lote enviado. Ainda restam ${restantes}. Novo lote agendado.`;
+      return `Lote enviado. Restam ${restantes}. Aguardando 30s para o próximo lote.`;
     }
 
-    // Finaliza
     await step.run("marcar-como-enviada", async () => {
       await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaId);
     });
 
-    return "Todos os e-mails da campanha foram enviados!";
+    return "Campanha concluída!";
   }
 );
