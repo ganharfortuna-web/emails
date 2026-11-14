@@ -19,7 +19,6 @@ export const processarFilaEmails = inngest.createFunction(
     );
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
-    // ✅ 1. VERIFICA SE ESTÁ PAUSADA ANTES DE FAZER QUALQUER COISA
     const statusCampanha = await step.run("checar-status", async () => {
       const { data } = await supabase.from('campanhas').select('status').eq('id', campanhaId).single();
       return data?.status;
@@ -42,7 +41,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(20);
+        .limit(20); // Lotes de 20
       return data || [];
     });
 
@@ -90,7 +89,6 @@ export const processarFilaEmails = inngest.createFunction(
       });
     }
 
-    // ✅ 2. SE O LOTE INTEIRO FALHAR, PARA O ENVIO PARA NÃO FAZER LOOP INFINITO
     if (enviadosComSucesso === 0) {
       await step.run("pausar-por-erro", async () => {
         await supabase.from('campanhas').update({ status: 'Pausada' }).eq('id', campanhaId);
@@ -104,9 +102,10 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      await step.sleep("aguardar-rate-limit", "60s"); // Aumentei para 60s por segurança
+      // ✅ PAUSA DE 60 SEGUNDOS OBRIGATÓRIA ANTES DE MANDAR O PRÓXIMO LOTE
+      await step.sleep("aguardar-rate-limit", "60s");
       await step.sendEvent("continuar-envio", { name: "campanha/iniciar", data: { campanhaId } });
-      return `Lote enviado. Restam ${restantes}. Aguardando 60s.`;
+      return `Lote enviado. Restam ${restantes}. Aguardando 60s para o próximo.`;
     }
 
     await step.run("marcar-como-enviada", async () => {

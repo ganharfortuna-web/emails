@@ -182,9 +182,7 @@ export default function AutomacoesPage() {
     setProcessandoId(null); buscarCampanhas(true); carregarStats()
   }
 
-  // ✅ ABRIR MODAL DE REENVIO (Contagem Exata via Banco)
   const abrirModalReenvio = async (campanha: any) => {
-    // Conta exata no banco, sem limite de 1000 linhas
     const { count: naoAbriram, error } = await supabase
       .from('email_queue')
       .select('*', { count: 'exact', head: true })
@@ -192,21 +190,13 @@ export default function AutomacoesPage() {
       .eq('status', 'sent')
       .is('opened_at', null)
 
-    if (error) {
-      alert("Erro ao contar contatos: " + error.message)
-      return
-    }
-
-    if (!naoAbriram || naoAbriram === 0) { 
-      alert('🎉 Todos já abriram ou não há e-mails enviados suficientes nesta campanha!'); 
-      return 
-    }
+    if (error) { alert("Erro ao contar contatos: " + error.message); return }
+    if (!naoAbriram || naoAbriram === 0) { alert('🎉 Todos já abriram ou não há e-mails enviados suficientes!'); return }
     
     setModalReenvio({ ...campanha, totalNaoAbriram: naoAbriram }); 
     setNovoTitulo(`[REENVIO] ${campanha.assunto}`)
   }
 
-  // ✅ CONFIRMAR REENVIO (Busca paginada para contornar o limite de 1000)
   const confirmarReenvio = async () => {
     if (!modalReenvio) return
     setProcessandoReenvio(true)
@@ -217,7 +207,6 @@ export default function AutomacoesPage() {
     let hasMore = true
 
     try {
-      // 1. Busca paginada de todos que não abriram
       while (hasMore) {
         const { data, error } = await supabase
           .from('email_queue')
@@ -233,40 +222,21 @@ export default function AutomacoesPage() {
           todosNaoAbriram = [...todosNaoAbriram, ...data]
           if (data.length < pageSize) hasMore = false
           else page++
-        } else {
-          hasMore = false
-        }
+        } else { hasMore = false }
       }
 
-      if (todosNaoAbriram.length === 0) { 
-        alert('🎉 Todos já abriram!'); 
-        setModalReenvio(null); 
-        setProcessandoReenvio(false); 
-        return 
-      }
+      if (todosNaoAbriram.length === 0) { alert('🎉 Todos já abriram!'); setModalReenvio(null); setProcessandoReenvio(false); return }
 
-      // 2. Cria a nova campanha
       const { data: nova, error: errCampanha } = await supabase.from('campanhas').insert([{ 
-        lista_id: modalReenvio.lista_id, 
-        assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`, 
-        mensagem: todosNaoAbriram[0].body, 
-        status: 'Em Fila' 
+        lista_id: modalReenvio.lista_id, assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`, 
+        mensagem: todosNaoAbriram[0].body, status: 'Em Fila' 
       }]).select().single()
       
-      if (errCampanha || !nova) { 
-        alert('Erro ao criar campanha de reenvio.'); 
-        setProcessandoReenvio(false); 
-        return 
-      }
+      if (errCampanha || !nova) { alert('Erro ao criar campanha de reenvio.'); setProcessandoReenvio(false); return }
 
-      // 3. Insere a nova fila em blocos de 500 para não estourar a memória da Vercel
       const fila = todosNaoAbriram.map(o => ({ 
-        campaign_id: nova.id, 
-        recipient_email: o.recipient_email, 
-        recipient_name: o.recipient_name, 
-        subject: novoTitulo || `[REENVIO] ${o.subject}`, 
-        body: o.body, 
-        status: 'pending' 
+        campaign_id: nova.id, recipient_email: o.recipient_email, recipient_name: o.recipient_name, 
+        subject: novoTitulo || `[REENVIO] ${o.subject}`, body: o.body, status: 'pending' 
       }))
 
       for (let i = 0; i < fila.length; i += 500) {
@@ -275,16 +245,8 @@ export default function AutomacoesPage() {
         if (errFila) throw errFila
       }
 
-      setModalReenvio(null); 
-      setNovoTitulo(''); 
-      setProcessandoReenvio(false);
-      buscarCampanhas(); 
-      dispararCampanha(nova.id)
-      
-    } catch (err: any) {
-      alert("Erro ao preparar reenvio: " + err.message)
-      setProcessandoReenvio(false)
-    }
+      setModalReenvio(null); setNovoTitulo(''); setProcessandoReenvio(false); buscarCampanhas(); dispararCampanha(nova.id)
+    } catch (err: any) { alert("Erro ao preparar reenvio: " + err.message); setProcessandoReenvio(false) }
   }
 
   const toggleSelecionada = (id: string) => { const novo = new Set(selecionadas); novo.has(id) ? novo.delete(id) : novo.add(id); setSelecionadas(novo) }
@@ -417,12 +379,27 @@ export default function AutomacoesPage() {
               const temTrabalhoPendente = st.enviados < st.total;
               const faltam = st.total - st.enviados;
 
-              const displayStatus = temFalhas ? 'Com Erros' : c.status;
-              const corStatus = displayStatus === 'Pausada' ? 'bg-slate-200 text-slate-700' : 
-                                displayStatus === 'Agendada' ? 'bg-purple-100 text-purple-700' : 
-                                displayStatus === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : 
-                                displayStatus === 'Com Erros' ? 'bg-red-100 text-red-700' : 
-                                displayStatus === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              // ✅ A LÓGICA VISUAL AGORA RESPEITA O ENVIO ATIVO
+              let displayStatus = c.status;
+              let corStatus = 'bg-amber-100 text-amber-700';
+
+              if (c.status === 'Pausada') {
+                displayStatus = 'Pausada';
+                corStatus = 'bg-slate-200 text-slate-700';
+              } else if (c.status === 'Agendada') {
+                displayStatus = 'Agendada';
+                corStatus = 'bg-purple-100 text-purple-700';
+              } else if (temTrabalhoPendente) {
+                // Enquanto tem e-mail pra sair, o status é "Enviando", não importa os erros passados
+                displayStatus = 'Enviando...';
+                corStatus = 'bg-cyan-100 text-cyan-700';
+              } else if (temFalhas) {
+                displayStatus = 'Concluído c/ Erros';
+                corStatus = 'bg-red-100 text-red-700';
+              } else {
+                displayStatus = 'Enviada';
+                corStatus = 'bg-emerald-100 text-emerald-700';
+              }
 
               return (
                 <div key={c.id} className={`p-4 rounded-xl border transition-colors ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'}`}>
@@ -482,7 +459,7 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* MODAL DE DIAGNÓSTICO */}
+      {/* MODAIS */}
       {modalDiagnostico && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
@@ -511,7 +488,6 @@ export default function AutomacoesPage() {
         </div>
       )}
 
-      {/* MODAIS (DESEMPENHO E REENVIO) */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
