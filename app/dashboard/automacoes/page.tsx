@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, CheckCircle2 } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -45,6 +45,11 @@ export default function AutomacoesPage() {
   const [carregandoHistorico, setCarregandoHistorico] = useState(true)
   const [atualizando, setAtualizando] = useState(false)
 
+  // ✅ ESTADOS DE PAGINAÇÃO DO HISTÓRICO
+  const [pageCampanhas, setPageCampanhas] = useState(0)
+  const [totalCampanhas, setTotalCampanhas] = useState(0)
+  const pageSizeCampanhas = 10
+
   const [listaSelecionada, setListaSelecionada] = useState('')
   const [assunto, setAssunto] = useState('')
   const [mensagem, setMensagem] = useState('')
@@ -66,8 +71,15 @@ export default function AutomacoesPage() {
 
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
-  useEffect(() => { buscarListas(); buscarCampanhas(); }, [])
-  useEffect(() => { const id = setInterval(() => buscarCampanhas(true), 5000); return () => clearInterval(id); }, [])
+  useEffect(() => { buscarListas() }, [])
+  useEffect(() => { buscarCampanhas() }, [pageCampanhas])
+  
+  // O timer agora atualiza a página atual do histórico
+  useEffect(() => { 
+    const id = setInterval(() => buscarCampanhas(true), 5000); 
+    return () => clearInterval(id); 
+  }, [pageCampanhas])
+  
   useEffect(() => { if (campanhas.length > 0) carregarStats(); }, [campanhas])
 
   const buscarListas = async () => {
@@ -78,8 +90,19 @@ export default function AutomacoesPage() {
   const buscarCampanhas = async (silencioso = false) => {
     if (!silencioso) setCarregandoHistorico(true)
     if (silencioso) setAtualizando(true)
-    const { data } = await supabase.from('campanhas').select('*, listas(nome)').order('created_at', { ascending: false }).limit(50)
+    
+    const from = pageCampanhas * pageSizeCampanhas
+    const to = from + pageSizeCampanhas - 1
+
+    const { data, count } = await supabase
+      .from('campanhas')
+      .select('*, listas(nome)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to)
+
     if (data) setCampanhas(data)
+    if (count !== null) setTotalCampanhas(count)
+    
     setCarregandoHistorico(false); setAtualizando(false)
   }
 
@@ -112,23 +135,29 @@ export default function AutomacoesPage() {
   }
 
   const limparErros = async (campanhaId: string | number) => {
-    if (!confirm("⚠️ Apagar estes e-mails da fila?")) return
+    if (!confirm("⚠️ Tem certeza que deseja APAGAR estes e-mails da fila?\n\nEles não serão mais enviados nesta campanha.")) return
     setProcessandoId(String(campanhaId))
     try {
       await supabase.from('email_queue').delete().eq('campaign_id', campanhaId).in('status', ['failed', 'suppressed'])
-      alert("✅ Erros limpos!")
-      setModalErros(null); buscarCampanhas(true); carregarStats()
+      alert("✅ Erros limpos com sucesso!")
+      setModalErros(null)
+      buscarCampanhas(true); carregarStats()
     } catch (err: any) { alert("Erro: " + err.message) }
     setProcessandoId(null)
   }
 
   const retentarErros = async (campanhaId: string | number) => {
-    if (!confirm("🔄 Tentar enviar novamente os e-mails que falharam?")) return
+    if (!confirm("🔄 Deseja tentar enviar novamente os e-mails que falharam?")) return
     setProcessandoId(String(campanhaId)); setModalErros(null)
+    
     await supabase.from('email_queue').update({ status: 'pending', retry_count: 0, next_retry_at: null }).eq('campaign_id', campanhaId).eq('status', 'failed');
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
     buscarCampanhas(true); carregarStats()
-    try { await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) }) } catch (err) { alert("Erro ao reativar Inngest.") }
+
+    try {
+      await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) })
+      alert("🚀 Tentativa de reenvio iniciada em background!")
+    } catch (err) { alert("Erro ao reativar Inngest.") }
     setProcessandoId(null)
   }
 
@@ -136,17 +165,23 @@ export default function AutomacoesPage() {
     setProcessandoId(String(campanhaId))
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
     buscarCampanhas(true); carregarStats()
+
     try {
       const r = await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) })
-      if (r.ok) { alert("🚀 Envio iniciado!"); setProcessandoId(null); buscarCampanhas(true); carregarStats(); return }
+      if (r.ok) {
+        alert("🚀 Envio iniciado em background!")
+        setProcessandoId(null); buscarCampanhas(true); carregarStats(); return
+      }
     } catch (err) { console.log("Inngest falhou.") }
+
     let continuar = true, falhas = 0
     while (continuar) {
       try {
         const r = await fetch('/api/disparo/processar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) })
         if (r.status === 504 || r.status === 502) { falhas++; if (falhas > 10) break; await new Promise(res => setTimeout(res, 5000)); continue }
         if (!r.ok) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 5000)); continue }
-        const j = await r.json(); falhas = 0 
+        const j = await r.json()
+        falhas = 0 
         if (j.done || j.restantes === 0) continuar = false
         else await new Promise(res => setTimeout(res, 3000))
       } catch (err) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 5000)) }
@@ -156,8 +191,8 @@ export default function AutomacoesPage() {
 
   const abrirModalReenvio = async (campanha: any) => {
     const { count: naoAbriram, error } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', campanha.id).eq('status', 'sent').is('opened_at', null)
-    if (error) { alert("Erro ao contar: " + error.message); return }
-    if (!naoAbriram || naoAbriram === 0) { alert('🎉 Todos já abriram!'); return }
+    if (error) { alert("Erro ao contar contatos: " + error.message); return }
+    if (!naoAbriram || naoAbriram === 0) { alert('🎉 Todos já abriram ou não há e-mails enviados!'); return }
     setModalReenvio({ ...campanha, totalNaoAbriram: naoAbriram }); setNovoTitulo(`[REENVIO] ${campanha.assunto}`)
   }
 
@@ -176,7 +211,7 @@ export default function AutomacoesPage() {
       }
       if (todosNaoAbriram.length === 0) { alert('🎉 Todos já abriram!'); setModalReenvio(null); setProcessandoReenvio(false); return }
       const { data: nova, error: errCampanha } = await supabase.from('campanhas').insert([{ lista_id: modalReenvio.lista_id, assunto: novoTitulo || `[REENVIO] ${modalReenvio.assunto}`, mensagem: todosNaoAbriram[0].body, status: 'Em Fila' }]).select().single()
-      if (errCampanha || !nova) { alert('Erro ao criar campanha.'); setProcessandoReenvio(false); return }
+      if (errCampanha || !nova) { alert('Erro ao criar campanha de reenvio.'); setProcessandoReenvio(false); return }
       const fila = todosNaoAbriram.map(o => ({ campaign_id: nova.id, recipient_email: o.recipient_email, recipient_name: o.recipient_name, subject: novoTitulo || `[REENVIO] ${o.subject}`, body: o.body, status: 'pending' }))
       for (let i = 0; i < fila.length; i += 500) {
         const bloco = fila.slice(i, i + 500)
@@ -184,7 +219,7 @@ export default function AutomacoesPage() {
         if (errFila) throw errFila
       }
       setModalReenvio(null); setNovoTitulo(''); setProcessandoReenvio(false); buscarCampanhas(); dispararCampanha(nova.id)
-    } catch (err: any) { alert("Erro: " + err.message); setProcessandoReenvio(false) }
+    } catch (err: any) { alert("Erro ao preparar reenvio: " + err.message); setProcessandoReenvio(false) }
   }
 
   const toggleSelecionada = (id: string) => { const novo = new Set(selecionadas); novo.has(id) ? novo.delete(id) : novo.add(id); setSelecionadas(novo) }
@@ -213,7 +248,6 @@ export default function AutomacoesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // ✅ SEGURANÇA: Agora usa ignoreDuplicates para NÃO mover contatos de listas
   const criarSegmento = async () => {
     if (!modalDetalhes || !nomeNovaLista.trim()) { alert('Digite um nome.'); return }
     setCriandoLista(true); setMsgSucesso('')
@@ -242,8 +276,6 @@ export default function AutomacoesPage() {
       
       for (let i = 0; i < novosContatos.length; i += 500) {
         const bloco = novosContatos.slice(i, i + 500)
-        // ✅ AQUI ESTÁ A CORREÇÃO DE SEGURANÇA (ignoreDuplicates: true)
-        // Se o e-mail já existe em outra lista, ele NÃO será movido.
         await supabase.from('contatos').upsert(bloco, { onConflict: 'email', ignoreDuplicates: true })
       }
 
@@ -263,6 +295,7 @@ export default function AutomacoesPage() {
       const r = await fetch('/api/disparo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) })
       if (!r.ok) { alert(`Erro ao enfileirar.`); setEnviando(false); return }
       setEnviando(false); setAssunto(''); setMensagem(''); setListaSelecionada(''); setScheduledAt('')
+      setPageCampanhas(0) // Volta para a página 1 para ver a campanha nova
       buscarCampanhas(); 
       if (!scheduledAt) {
         try { await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) }) } catch(e) { console.log("Inngest falhou.") }
@@ -271,6 +304,7 @@ export default function AutomacoesPage() {
   }
 
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
+  const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -393,10 +427,36 @@ export default function AutomacoesPage() {
                 </div>
               )
             })}
+
+            {/* ✅ CONTROLES DE PAGINAÇÃO DO HISTÓRICO */}
+            {totalCampanhas > 0 && (
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs text-slate-500 font-medium">
+                  Página {pageCampanhas + 1} de {totalPages}
+                </span>
+                <div className="flex gap-1">
+                  <button 
+                    onClick={() => setPageCampanhas(p => Math.max(0, p - 1))} 
+                    disabled={pageCampanhas === 0 || carregandoHistorico}
+                    className="p-1.5 border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </button>
+                  <button 
+                    onClick={() => setPageCampanhas(p => Math.min(totalPages - 1, p + 1))} 
+                    disabled={pageCampanhas >= totalPages - 1 || carregandoHistorico}
+                    className="p-1.5 border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  >
+                    <ChevronRight className="size-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
+      {/* MODAL DE ERROS */}
       {modalErros && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[80vh]">
@@ -421,7 +481,7 @@ export default function AutomacoesPage() {
 
             <div className="p-6 border-t bg-slate-50 flex justify-between items-center shrink-0">
               <button onClick={() => limparErros(modalErros.id)} disabled={processandoId === String(modalErros.id)} className="px-5 py-2.5 font-bold text-red-600 hover:bg-red-100 rounded-xl flex items-center gap-2">
-                <Trash2 className="size-4" /> Apagar Erros
+                <Trash2 className="size-4" /> Apagar E-mails com Erro
               </button>
               
               <div className="flex gap-2">
@@ -435,6 +495,7 @@ export default function AutomacoesPage() {
         </div>
       )}
 
+      {/* MODAL DE DESEMPENHO */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
