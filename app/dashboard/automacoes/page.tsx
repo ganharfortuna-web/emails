@@ -56,7 +56,7 @@ export default function AutomacoesPage() {
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
-  const [modalErros, setModalErros] = useState<any>(null) // ✅ NOVO MODAL DE ERROS
+  const [modalErros, setModalErros] = useState<any>(null)
   const [listaErros, setListaErros] = useState<any[]>([])
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
@@ -104,7 +104,6 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  // ✅ FUNÇÃO PARA ABRIR A LISTA DE ERROS
   const abrirModalErros = async (campanha: any) => {
     const { data, error } = await supabase
       .from('email_queue')
@@ -119,7 +118,6 @@ export default function AutomacoesPage() {
     setModalErros(campanha)
   }
 
-  // ✅ FUNÇÃO PARA LIMPAR ERROS (Agora fica dentro do modal)
   const limparErros = async (campanhaId: string | number) => {
     if (!confirm("⚠️ Tem certeza que deseja APAGAR estes e-mails da fila?\n\nEles não serão mais enviados nesta campanha.")) return
     setProcessandoId(String(campanhaId))
@@ -132,11 +130,10 @@ export default function AutomacoesPage() {
     setProcessandoId(null)
   }
 
-  // ✅ FUNÇÃO PARA TENTAR NOVAMENTE
   const retentarErros = async (campanhaId: string | number) => {
     if (!confirm("🔄 Deseja tentar enviar novamente os e-mails que falharam?")) return
     setProcessandoId(String(campanhaId))
-    setModalErros(null) // Fecha o modal
+    setModalErros(null)
     
     await supabase.from('email_queue')
       .update({ status: 'pending', retry_count: 0, next_retry_at: null })
@@ -167,7 +164,6 @@ export default function AutomacoesPage() {
       }
     } catch (err) { console.log("Inngest falhou.") }
 
-    // Fallback
     let continuar = true, falhas = 0
     while (continuar) {
       try {
@@ -386,8 +382,8 @@ export default function AutomacoesPage() {
               const estaDisparando = processandoId === String(c.id)
               
               const temFalhas = st.falhados > 0;
-              const temTrabalhoPendente = st.enviados < st.total;
-              const faltam = st.total - st.enviados;
+              const temTrabalhoPendente = st.pendentes > 0; // ✅ Agora só conta o que está 'pending' de verdade
+              const faltam = st.pendentes; // ✅ Mostra apenas os pendentes
 
               let displayStatus = c.status;
               let corStatus = 'bg-amber-100 text-amber-700';
@@ -402,7 +398,7 @@ export default function AutomacoesPage() {
                 displayStatus = 'Enviando...';
                 corStatus = 'bg-cyan-100 text-cyan-700';
               } else if (temFalhas) {
-                displayStatus = 'Concluído c/ Erros';
+                displayStatus = 'Finalizada c/ Erros'; // ✅ Novo status claro
                 corStatus = 'bg-red-100 text-red-700';
               } else {
                 displayStatus = 'Enviada';
@@ -440,7 +436,7 @@ export default function AutomacoesPage() {
                           </button>
                         )}
                         
-                        {/* ✅ BOTÃO VER ERROS (Substitui o Ver Motivo e o Limpar direto) */}
+                        {/* ✅ ÚNICO BOTÃO DE ERRO: Abre o modal para ver antes de fazer qualquer coisa */}
                         {st.falhados > 0 && (
                           <button onClick={() => abrirModalErros(c)} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded">
                             <ShieldAlert className="size-3"/> Ver Erros ({st.falhados})
@@ -462,14 +458,14 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* ✅ MODAL DE ERROS DETALHADO */}
+      {/* ✅ MODAL DE ERROS */}
       {modalErros && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[80vh]">
             <div className="p-6 border-b bg-red-50 flex justify-between items-center shrink-0">
               <div>
                 <h2 className="text-xl font-black text-red-900 flex items-center gap-2"><ShieldAlert className="size-5" /> Detalhes dos Erros</h2>
-                <p className="text-red-700 text-sm mt-1">Abaixo estão os e-mails que falharam e o motivo. Você pode tentar enviar novamente ou apagar.</p>
+                <p className="text-red-700 text-sm mt-1">Abaixo estão os e-mails que falharam e o motivo. Você pode tentar novamente ou apagar.</p>
               </div>
               <button onClick={() => setModalErros(null)} className="text-red-400 hover:text-red-700"><X className="size-5" /></button>
             </div>
