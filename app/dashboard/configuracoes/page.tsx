@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Server, Edit, Save, Loader2, Mail, Globe, Info, CheckCircle2, Key, Link as LinkIcon, Trash2 } from 'lucide-react'
+import { Server, Edit, Save, Loader2, Mail, Globe, Info, CheckCircle2, Key, Link as LinkIcon, Trash2, Zap } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -24,7 +24,8 @@ const FORM_VAZIO = { nome: '', provider: 'gmail', host: 'smtp.gmail.com', porta:
 
 export default function ConfiguracoesPage() {
   const [abaAtiva, setAbaAtiva] = useState<'smtp' | 'api'>('smtp')
-
+  const [motorPrincipal, setMotorPrincipal] = useState<'smtp' | 'api'>('smtp')
+  
   // ================= ESTADOS SMTP =================
   const [contaUnica, setContaUnica] = useState<any>(null)
   const [carregando, setCarregando] = useState(true)
@@ -71,7 +72,35 @@ export default function ConfiguracoesPage() {
       setEditandoApi(true)
     }
 
+    // 3. Define qual é o motor principal
+    if (apiData?.is_active) {
+      setMotorPrincipal('api')
+      setAbaAtiva('api')
+    } else if (smtpData?.is_active) {
+      setMotorPrincipal('smtp')
+      setAbaAtiva('smtp')
+    }
+
     setCarregando(false)
+  }
+
+  // ================= TROCAR MOTOR PRINCIPAL =================
+  const alterarMotor = async (motor: 'smtp' | 'api') => {
+    setCarregando(true)
+    if (motor === 'smtp') {
+      // Desativa API e Ativa SMTP
+      await supabase.from('api_providers').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000')
+      if (contaUnica?.id) await supabase.from('smtp_accounts').update({ is_active: true }).eq('id', contaUnica.id)
+    } else {
+      // Desativa SMTP e Ativa API
+      await supabase.from('smtp_accounts').update({ is_active: false }).neq('id', '00000000-0000-0000-0000-000000000000')
+      if (apiConfig?.id) await supabase.from('api_providers').update({ is_active: true }).eq('id', apiConfig.id)
+    }
+    setMotorPrincipal(motor)
+    setAbaAtiva(motor)
+    setMsgDebug(`✅ Motor de envio alterado para ${motor.toUpperCase()} com sucesso!`)
+    setTimeout(() => setMsgDebug(null), 4000)
+    await carregarDados()
   }
 
   // ================= FUNÇÕES SMTP =================
@@ -90,7 +119,7 @@ export default function ConfiguracoesPage() {
     const payload: any = {
       sender_name: formData.nome, type: p.tipo, host: formData.host || 'smtp.gmail.com',
       port: Number(formData.porta) || 587, email: formData.usuario.trim(),
-      sender_email: formData.remetente.trim().toLowerCase(), is_active: true, daily_limit: formData.daily_limit || 450,
+      sender_email: formData.remetente.trim().toLowerCase(), is_active: motorPrincipal === 'smtp', daily_limit: formData.daily_limit || 450,
     }
 
     if (formData.senha && formData.senha.trim() !== '') payload.app_password = formData.senha
@@ -118,9 +147,8 @@ export default function ConfiguracoesPage() {
     setSalvandoApi(true)
     setMsgDebug(null)
 
-    const payload: any = { name: formApi.nome, api_url: formApi.url, list_id: formApi.list_id, is_active: true }
+    const payload: any = { name: formApi.nome, api_url: formApi.url, list_id: formApi.list_id, is_active: motorPrincipal === 'api' }
     
-    // Só atualiza a key se o usuário digitou algo
     if (formApi.key && formApi.key.trim() !== '') payload.api_key = formApi.key
 
     let error = null
@@ -143,6 +171,7 @@ export default function ConfiguracoesPage() {
     if (!confirm('Apagar esta configuração de API?')) return
     await supabase.from('api_providers').delete().eq('id', apiConfig.id)
     setApiConfig(null); setFormApi({ nome: '', url: '', key: '', list_id: '' }); setEditandoApi(true)
+    if (motorPrincipal === 'api') setMotorPrincipal('smtp')
   }
 
   if (carregando) return <div className="max-w-4xl mx-auto p-12 flex justify-center"><Loader2 className="size-8 animate-spin text-blue-500" /></div>
@@ -156,19 +185,41 @@ export default function ConfiguracoesPage() {
         </div>
       )}
 
-      {/* CABEÇALHO E ABAS */}
+      {/* CABEÇALHO */}
       <div>
         <h2 className="text-3xl font-black text-slate-900">Configurações de Envio</h2>
-        <p className="text-slate-600 mt-1">Gerencie suas credenciais de envio via SMTP ou API.</p>
-        
-        <div className="flex gap-2 mt-6 p-1 bg-slate-100 rounded-xl w-fit">
-          <button onClick={() => setAbaAtiva('smtp')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-colors ${abaAtiva === 'smtp' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>
-            <Server className="size-4" /> Servidor SMTP
-          </button>
-          <button onClick={() => setAbaAtiva('api')} className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold text-sm transition-colors ${abaAtiva === 'api' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>
-            <Globe className="size-4" /> API Externa (Ex: Mailrelay)
-          </button>
-        </div>
+        <p className="text-slate-600 mt-1">Escolha qual motor será usado como principal para os disparos.</p>
+      </div>
+
+      {/* SELETOR DE MOTOR PRINCIPAL */}
+      <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-sm flex gap-2">
+        <button 
+          onClick={() => alterarMotor('smtp')} 
+          className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${motorPrincipal === 'smtp' ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:bg-slate-50'}`}
+        >
+          <Server className={`size-6 mb-2 ${motorPrincipal === 'smtp' ? 'text-blue-600' : 'text-slate-400'}`} />
+          <span className={`font-bold ${motorPrincipal === 'smtp' ? 'text-blue-900' : 'text-slate-600'}`}>Usar Servidor SMTP</span>
+          <span className="text-xs text-slate-500 mt-1">Lotes controlados, sem custo extra</span>
+        </button>
+
+        <button 
+          onClick={() => alterarMotor('api')} 
+          className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${motorPrincipal === 'api' ? 'border-indigo-500 bg-indigo-50' : 'border-transparent hover:bg-slate-50'}`}
+        >
+          <Globe className={`size-6 mb-2 ${motorPrincipal === 'api' ? 'text-indigo-600' : 'text-slate-400'}`} />
+          <span className={`font-bold ${motorPrincipal === 'api' ? 'text-indigo-900' : 'text-slate-600'}`}>Usar API Externa</span>
+          <span className="text-xs text-slate-500 mt-1">Ultra rápido, sem limite da Vercel</span>
+        </button>
+      </div>
+
+      {/* ABAS DE CONFIGURAÇÃO */}
+      <div className="flex gap-2 mt-8 border-b border-slate-200 pb-px">
+        <button onClick={() => setAbaAtiva('smtp')} className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${abaAtiva === 'smtp' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+          Configurar SMTP
+        </button>
+        <button onClick={() => setAbaAtiva('api')} className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${abaAtiva === 'api' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+          Configurar API Externa
+        </button>
       </div>
 
       {/* CONTEÚDO: SMTP */}
@@ -184,7 +235,7 @@ export default function ConfiguracoesPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-xl font-black text-slate-900">{contaUnica.sender_name || 'Servidor SMTP'}</h3>
-                      <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1"><CheckCircle2 className="size-3.5" /> Ativa</span>
+                      {motorPrincipal === 'smtp' && <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1"><CheckCircle2 className="size-3.5" /> Em Uso</span>}
                     </div>
                     <p className="text-sm text-slate-500 mt-0.5">Conta utilizada para os disparos em lotes</p>
                   </div>
@@ -242,7 +293,7 @@ export default function ConfiguracoesPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-xl font-black text-slate-900">{apiConfig.name}</h3>
-                      <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1"><CheckCircle2 className="size-3.5" /> Ativa</span>
+                      {motorPrincipal === 'api' && <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1"><CheckCircle2 className="size-3.5" /> Em Uso</span>}
                     </div>
                     <p className="text-sm text-slate-500 mt-0.5">Conexão via API para envio em massa instantâneo</p>
                   </div>
@@ -262,7 +313,7 @@ export default function ConfiguracoesPage() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
               <div className="bg-indigo-50 text-indigo-800 p-4 rounded-xl mb-6 text-sm flex gap-3">
                 <Info className="size-5 shrink-0" />
-                <p>Esta API será chamada na tela de <strong>Automações</strong> quando você clicar em <strong>"Enviar via API Externa"</strong>. O envio não usará o SMTP, mas sim os servidores da sua plataforma (ex: Mailrelay), garantindo velocidade e evitando limites da Vercel.</p>
+                <p>Esta API será chamada na tela de <strong>Automações</strong> quando você clicar em <strong>"Disparar"</strong>. O envio não usará o SMTP, mas sim os servidores da sua plataforma (ex: Mailrelay), garantindo velocidade e evitando limites da Vercel.</p>
               </div>
               
               <form onSubmit={salvarAPI} className="space-y-6">
