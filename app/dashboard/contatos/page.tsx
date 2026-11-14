@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { Search, Filter, Trash2, UserCircle2, MessageCircle, Download, Loader2 } from 'lucide-react'
+import { Search, Filter, Trash2, UserCircle2, MessageCircle, Download, Loader2, Upload, X, FileText, ClipboardPaste } from 'lucide-react'
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
@@ -14,6 +14,14 @@ export default function ContatosPage() {
   const [carregando, setCarregando] = useState(true)
   const [exportando, setExportando] = useState(false)
   const [deletandoId, setDeletandoId] = useState<string | null>(null)
+
+  // Estados para Importação
+  const [modalImportar, setModalImportar] = useState(false)
+  const [modoImportacao, setModoImportacao] = useState<'arquivo' | 'colar'>('arquivo')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [textoColado, setTextoColado] = useState('')
+  const [listaDestino, setListaDestino] = useState('')
+  const [importando, setImportando] = useState(false)
 
   useEffect(() => {
     carregarListas()
@@ -30,7 +38,6 @@ export default function ContatosPage() {
 
   const carregarContatos = async () => {
     setCarregando(true)
-    // Pega os 100 mais recentes. Se tiver filtro, aplica.
     let query = supabase
       .from('contatos')
       .select('*, listas(nome)')
@@ -45,7 +52,7 @@ export default function ContatosPage() {
     setCarregando(false)
   }
 
-  // ✅ EXCLUSÃO DEFINITIVA (Apaga do Banco e Atualiza a Tela)
+  // ✅ EXCLUSÃO DEFINITIVA E SEGURA
   const deletarContato = async (id: string) => {
     if (!confirm('Tem certeza que deseja apagar este contato permanentemente do banco de dados?\n\nEle será removido de TODAS as listas.')) return
     
@@ -53,7 +60,6 @@ export default function ContatosPage() {
     const { error } = await supabase.from('contatos').delete().eq('id', id)
     
     if (!error) {
-      // Atualiza a lista na tela localmente para ser instantâneo
       setContatos(prev => prev.filter(c => c.id !== id))
     } else {
       alert('Erro ao apagar contato: ' + error.message)
@@ -68,6 +74,81 @@ export default function ContatosPage() {
       numLimpo = `55${numLimpo}`
     }
     return `https://wa.me/${numLimpo}`
+  }
+
+  // ✅ IMPORTAÇÃO INTELIGENTE (ACEITA CSV, TXT E COLA DE TEXTO)
+  const processarImportacao = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!listaDestino) {
+      alert('Selecione uma lista de destino.')
+      return
+    }
+
+    setImportando(true)
+
+    const processarTexto = async (texto: string) => {
+      // Encontra todos os e-mails válidos no texto (ignora cabeçalhos, vírgulas, etc)
+      const regexEmail = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+      const matches = texto.match(regexEmail) || [];
+      
+      if (matches.length === 0) {
+        alert('Nenhum e-mail válido encontrado no texto/arquivo.')
+        setImportando(false)
+        return;
+      }
+
+      // Remove duplicatas
+      const emailsUnicos = [...new Set(matches.map(email => email.toLowerCase().trim()))];
+
+      const novosContatos = emailsUnicos.map(email => ({
+        nome: 'Lead',
+        email: email,
+        whatsapp: null,
+        lista_id: listaDestino, 
+        status: 'ativo'
+      }))
+
+      try {
+        // Insere em blocos de 500 para não estourar o Supabase
+        for (let i = 0; i < novosContatos.length; i += 500) {
+          const bloco = novosContatos.slice(i, i + 500)
+          const { error } = await supabase.from('contatos').upsert(bloco, { onConflict: 'email' })
+          if (error) throw error
+        }
+
+        alert(`✅ ${novosContatos.length} e-mails importados com sucesso!`)
+        setModalImportar(false)
+        setArquivo(null)
+        setTextoColado('')
+        setListaDestino('')
+        carregarContatos()
+      } catch (err: any) {
+        alert('Erro ao importar: ' + err.message)
+      }
+      
+      setImportando(false)
+    }
+
+    if (modoImportacao === 'colar') {
+      if (!textoColado.trim()) {
+        alert('Cole alguns e-mails na caixa de texto.')
+        setImportando(false)
+        return;
+      }
+      await processarTexto(textoColado)
+    } else {
+      if (!arquivo) {
+        alert('Selecione um arquivo.')
+        setImportando(false)
+        return;
+      }
+      const reader = new FileReader()
+      reader.onload = async (event) => {
+        const csvText = event.target?.result as string
+        await processarTexto(csvText)
+      }
+      reader.readAsText(arquivo)
+    }
   }
 
   const baixarCSV = async () => {
@@ -123,20 +204,31 @@ export default function ContatosPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      
+      {/* CABEÇALHO COM OS BOTÕES RESTAURADOS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-3xl font-black text-slate-900">Contatos</h2>
           <p className="text-slate-600 mt-1">Gerencie a sua base de leads.</p>
         </div>
         
-        <button 
-          onClick={baixarCSV}
-          disabled={exportando || carregando}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50"
-        >
-          {exportando ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-          {exportando ? 'Gerando...' : 'Baixar CSV'}
-        </button>
+        <div className="flex gap-2 w-full md:w-auto">
+          <button 
+            onClick={() => setModalImportar(true)}
+            className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center justify-center gap-2 transition-colors"
+          >
+            <Upload className="size-4" /> Importar
+          </button>
+          
+          <button 
+            onClick={baixarCSV}
+            disabled={exportando || carregando}
+            className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+          >
+            {exportando ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            {exportando ? 'Gerando...' : 'Baixar CSV'}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -227,6 +319,62 @@ export default function ContatosPage() {
           <span>Mostrando os {contatos.length} contatos mais recentes na tela (use o CSV para ver todos)</span>
         </div>
       </div>
+
+      {/* ✅ MODAL DE IMPORTAÇÃO */}
+      {modalImportar && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="p-6 border-b bg-blue-50 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-black text-blue-900 flex items-center gap-2"><Upload className="size-5" /> Importar Contatos</h2>
+                <p className="text-blue-700 text-sm mt-1">Adicione e-mails à sua lista.</p>
+              </div>
+              <button onClick={() => { setModalImportar(false); setArquivo(null); setTextoColado('') }} className="text-blue-400 hover:text-blue-700"><X className="size-5" /></button>
+            </div>
+            
+            <form onSubmit={processarImportacao} className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Selecione a Lista de Destino *</label>
+                <select required value={listaDestino} onChange={e => setListaDestino(e.target.value)} className="w-full p-3 border rounded-lg bg-white text-slate-800">
+                  <option value="">Escolha uma lista...</option>
+                  {listas.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                </select>
+              </div>
+
+              {/* ABAS DE IMPORTAÇÃO */}
+              <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
+                <button type="button" onClick={() => setModoImportacao('arquivo')} className={`flex-1 py-2 text-sm font-bold rounded-md flex items-center justify-center gap-2 ${modoImportacao === 'arquivo' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}><FileText className="size-4"/> Enviar Arquivo</button>
+                <button type="button" onClick={() => setModoImportacao('colar')} className={`flex-1 py-2 text-sm font-bold rounded-md flex items-center justify-center gap-2 ${modoImportacao === 'colar' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}><ClipboardPaste className="size-4"/> Colar E-mails</button>
+              </div>
+
+              {modoImportacao === 'arquivo' ? (
+                <div>
+                  <input type="file" accept=".csv,.txt" onChange={e => setArquivo(e.target.files?.[0] || null)} className="w-full p-2 border rounded-lg text-sm bg-slate-50 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200" />
+                  <p className="text-xs text-slate-500 mt-2">Aceita CSV ou TXT. O sistema vai extrair todos os e-mails válidos.</p>
+                </div>
+              ) : (
+                <div>
+                  <textarea 
+                    value={textoColado}
+                    onChange={e => setTextoColado(e.target.value)}
+                    placeholder="Cole aqui a lista de e-mails. Pode ser um por linha, separados por vírgula, ou copiados de uma planilha."
+                    className="w-full p-3 border rounded-lg h-32 text-sm text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-2">O sistema vai varrer o texto e encontrar todos os e-mails.</p>
+                </div>
+              )}
+
+              <div className="pt-4 flex justify-end gap-3 border-t">
+                <button type="button" onClick={() => { setModalImportar(false); setArquivo(null); setTextoColado('') }} className="px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl">Cancelar</button>
+                <button type="submit" disabled={importando} className="px-6 py-2.5 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl flex items-center gap-2 disabled:opacity-50">
+                  {importando ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                  {importando ? 'Importando...' : 'Iniciar Importação'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
