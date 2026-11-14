@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { AlertTriangle, CheckCircle2, RotateCcw, Loader2, ShieldAlert, Download } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, RotateCcw, Loader2, ShieldAlert, Download, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
@@ -11,28 +11,72 @@ export default function BouncesPage() {
   const [carregando, setCarregando] = useState(true)
   const [reativando, setReativando] = useState(false)
   const [filtro, setFiltro] = useState<'todos' | 'hard_bounce' | 'soft_bounce' | 'complaint'>('todos')
+  
+  // ✅ ESTADOS DA PAGINAÇÃO
+  const [page, setPage] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
+  const [deletandoTodos, setDeletandoTodos] = useState(false)
+  const pageSize = 100
 
   useEffect(() => {
     carregarLista()
-  }, [])
+  }, [page, filtro])
 
   const carregarLista = async () => {
     setCarregando(true)
-    const { data } = await supabase.from('suppression_list').select('*').order('created_at', { ascending: false })
-    if (data) setSuprimidos(data)
+    
+    // Define o range para buscar apenas 100 itens
+    const from = page * pageSize
+    const to = from + pageSize - 1
+
+    let query = supabase
+      .from('suppression_list')
+      .select('*', { count: 'exact' }) // Pede a contagem total para sabermos quantas páginas tem
+      .order('created_at', { ascending: false })
+      .range(from, to)
+
+    if (filtro !== 'todos') {
+      query = query.eq('reason', filtro)
+    }
+
+    const { data, count, error } = await query
+
+    if (!error && data) {
+      setSuprimidos(data)
+      setTotalCount(count || 0)
+    }
     setCarregando(false)
   }
 
-  // Função para Baixar CSV
-  const baixarCSV = () => {
-    if (suprimidos.length === 0) return
+  // ✅ FUNÇÃO PARA BAIXAR CSV (Busca TUDO de forma paginada para não travar)
+  const baixarCSV = async () => {
+    if (totalCount === 0) return
+    setCarregando(true)
 
-    // Cria o cabeçalho e as linhas do CSV
+    let todosExport: any[] = []
+    let currentPage = 0
+    let hasMore = true
+
+    while (hasMore) {
+      const from = currentPage * 1000
+      const to = from + 999
+      
+      let query = supabase.from('suppression_list').select('*').order('created_at', { ascending: false }).range(from, to)
+      if (filtro !== 'todos') query = query.eq('reason', filtro)
+
+      const { data } = await query
+      if (data && data.length > 0) {
+        todosExport = [...todosExport, ...data]
+        if (data.length < 1000) hasMore = false
+        else currentPage++
+      } else {
+        hasMore = false
+      }
+    }
+
     const cabecalho = "Email,Motivo,Data\n"
-    const linhas = suprimidos.map(s => `${s.email},${s.reason},${new Date(s.created_at).toLocaleDateString('pt-BR')}`).join("\n")
-    const csvContent = cabecalho + linhas
-
-    // Cria o arquivo e força o download
+    const linhas = todosExport.map(s => `${s.email},${s.reason},${new Date(s.created_at).toLocaleDateString('pt-BR')}`).join("\n")
+    const csvContent = "\uFEFF" + cabecalho + linhas
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -41,6 +85,8 @@ export default function BouncesPage() {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+
+    setCarregando(false)
   }
 
   const reativarUm = async (email: string) => {
@@ -53,15 +99,38 @@ export default function BouncesPage() {
   }
 
   const reativarTodos = async () => {
-    if (suprimidos.length === 0) return
-    if (!confirm(`⚠️ ATENÇÃO: Tem certeza que deseja reativar TODOS os ${suprimidos.length} e-mails?\n\nSe houver Hard Bounces (e-mails que não existem), a MailerLite pode bloquear sua conta.`)) return
+    if (totalCount === 0) return
+    if (!confirm(`⚠️ ATENÇÃO: Tem certeza que deseja reativar TODOS os ${totalCount} e-mails?\n\nRecomendamos reativar apenas se tiver certeza de que são válidos.`)) return
 
     setReativando(true)
     try {
-      const emails = suprimidos.map(s => s.email)
-      await supabase.from('suppression_list').delete().in('email', emails)
-      await supabase.from('contatos').update({ status: 'ativo', bounce_count: 0 }).in('email', emails)
+      // Busca todos os e-mails (ou apenas os filtrados)
+      let emails: string[] = []
+      let currentPage = 0
+      let hasMore = true
+
+      while (hasMore) {
+        let query = supabase.from('suppression_list').select('email').range(currentPage * 1000, (currentPage + 1) * 1000 - 1)
+        if (filtro !== 'todos') query = query.eq('reason', filtro)
+        
+        const { data } = await query
+        if (data && data.length > 0) {
+          emails = [...emails, ...data.map(d => d.email)]
+          if (data.length < 1000) hasMore = false
+          else currentPage++
+        } else { hasMore = false }
+      }
+
+      if (emails.length > 0) {
+        for (let i = 0; i < emails.length; i += 500) {
+          const bloco = emails.slice(i, i + 500)
+          await supabase.from('suppression_list').delete().in('email', bloco)
+          await supabase.from('contatos').update({ status: 'ativo', bounce_count: 0 }).in('email', bloco)
+        }
+      }
+      
       alert(`✅ ${emails.length} e-mails foram reativados com sucesso!`)
+      setPage(0)
       carregarLista()
     } catch (e: any) {
       alert("Erro ao reativar: " + e.message)
@@ -69,8 +138,24 @@ export default function BouncesPage() {
     setReativando(false)
   }
 
-  // Filtra a lista na tela
-  const listaFiltrada = suprimidos.filter(s => filtro === 'todos' ? true : s.reason === filtro)
+  // ✅ FUNÇÃO PARA APAGAR TUDO
+  const apagarTudo = async () => {
+    if (!confirm("🚨 CUIDADO EXTREMO! 🚨\n\nVocê está prestes a apagar TODOS os registros da lista de supressão.\nIsso significa que esses e-mails não estarão mais bloqueados (a menos que estejam na lista de contatos com status bounced).\n\nTem certeza absoluta que deseja apagar TUDO?")) return
+    
+    setDeletandoTodos(true)
+    try {
+      // A forma mais segura de deletar todos no Supabase é usando neq com um ID aleatório que não existe
+      await supabase.from('suppression_list').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      alert("✅ Lista de supressão esvaziada com sucesso!")
+      setPage(0)
+      carregarLista()
+    } catch (err: any) {
+      alert("Erro ao apagar lista: " + err.message)
+    }
+    setDeletandoTodos(false)
+  }
+
+  const totalPages = Math.ceil(totalCount / pageSize)
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -81,13 +166,25 @@ export default function BouncesPage() {
           <p className="text-slate-600 mt-1">Gerencie e-mails que falharam para proteger sua reputação.</p>
         </div>
         
-        <button 
-          onClick={baixarCSV} 
-          disabled={suprimidos.length === 0}
-          className="bg-white border border-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-lg shadow-sm flex items-center gap-2 hover:bg-slate-50 disabled:opacity-50"
-        >
-          <Download className="size-4" /> Baixar Lista (CSV)
-        </button>
+        <div className="flex gap-2">
+          {/* ✅ BOTÃO APAGAR TUDO */}
+          <button 
+            onClick={apagarTudo} 
+            disabled={totalCount === 0 || deletandoTodos}
+            className="bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-bold py-2.5 px-4 rounded-lg shadow-sm flex items-center gap-2 disabled:opacity-50 transition-colors"
+          >
+            {deletandoTodos ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            Apagar Tudo
+          </button>
+
+          <button 
+            onClick={baixarCSV} 
+            disabled={totalCount === 0 || carregando}
+            className="bg-white border border-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-lg shadow-sm flex items-center gap-2 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Download className="size-4" /> Baixar CSV
+          </button>
+        </div>
       </div>
 
       {/* ALERTA DE AVISO */}
@@ -97,28 +194,28 @@ export default function BouncesPage() {
           <div>
             <h3 className="font-bold text-amber-900">Lista de supressão ativa</h3>
             <p className="text-sm text-amber-700 mt-1 max-w-2xl">
-              Estes e-mails nunca receberão novas mensagens até serem reativados manualmente. <strong>Recomendamos NÃO reativar Hard Bounces.</strong>
+              Estes e-mails nunca receberão novas mensagens até serem reativados. <strong>Recomendamos NÃO reativar Hard Bounces.</strong>
             </p>
           </div>
         </div>
         
-        {suprimidos.length > 0 && (
+        {totalCount > 0 && (
           <button 
             onClick={reativarTodos} 
             disabled={reativando}
             className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50 shrink-0"
           >
             {reativando ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
-            Reativar todas
+            Reativar Todos
           </button>
         )}
       </div>
 
       {/* FILTROS */}
       <div className="flex gap-2 bg-white p-2 rounded-xl border border-slate-200 w-fit shadow-sm overflow-x-auto">
-        <button onClick={() => setFiltro('todos')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${filtro === 'todos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
-        <button onClick={() => setFiltro('hard_bounce')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${filtro === 'hard_bounce' ? 'bg-red-100 text-red-700' : 'text-slate-500 hover:bg-slate-50'}`}>Hard Bounce</button>
-        <button onClick={() => setFiltro('soft_bounce')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${filtro === 'soft_bounce' ? 'bg-amber-100 text-amber-700' : 'text-slate-500 hover:bg-slate-50'}`}>Soft Bounce</button>
+        <button onClick={() => { setFiltro('todos'); setPage(0); }} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${filtro === 'todos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
+        <button onClick={() => { setFiltro('hard_bounce'); setPage(0); }} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${filtro === 'hard_bounce' ? 'bg-red-100 text-red-700' : 'text-slate-500 hover:bg-slate-50'}`}>Hard Bounce</button>
+        <button onClick={() => { setFiltro('soft_bounce'); setPage(0); }} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${filtro === 'soft_bounce' ? 'bg-amber-100 text-amber-700' : 'text-slate-500 hover:bg-slate-50'}`}>Soft Bounce</button>
       </div>
 
       {/* TABELA */}
@@ -135,16 +232,16 @@ export default function BouncesPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {carregando ? (
-                <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500"><Loader2 className="size-6 animate-spin mx-auto text-blue-500" /></td></tr>
-              ) : listaFiltrada.length === 0 ? (
+                <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500"><Loader2 className="size-6 animate-spin mx-auto text-blue-500" /></td></tr>
+              ) : suprimidos.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500 font-medium">
+                  <td colSpan={4} className="px-6 py-12 text-center text-slate-500 font-medium">
                     <CheckCircle2 className="size-8 text-emerald-500 mx-auto mb-2" />
-                    Nenhum e-mail encontrado neste filtro.
+                    Nenhum e-mail encontrado nesta seleção.
                   </td>
                 </tr>
               ) : (
-                listaFiltrada.map((s) => (
+                suprimidos.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4 font-medium text-slate-800">{s.email}</td>
                     <td className="px-6 py-4">
@@ -166,6 +263,37 @@ export default function BouncesPage() {
             </tbody>
           </table>
         </div>
+
+        {/* ✅ CONTROLES DE PAGINAÇÃO */}
+        {totalCount > 0 && (
+          <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <span className="text-sm text-slate-500 font-medium">
+              Mostrando de <strong>{page * pageSize + 1}</strong> a <strong>{Math.min((page + 1) * pageSize, totalCount)}</strong> de <strong>{totalCount}</strong> registros.
+            </span>
+            
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setPage(p => Math.max(0, p - 1))} 
+                disabled={page === 0 || carregando}
+                className="p-2 border border-slate-200 bg-white rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                <ChevronLeft className="size-5" />
+              </button>
+              
+              <span className="text-sm font-bold text-slate-700 px-3">
+                Página {page + 1} de {totalPages}
+              </span>
+              
+              <button 
+                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} 
+                disabled={page >= totalPages - 1 || carregando}
+                className="p-2 border border-slate-200 bg-white rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                <ChevronRight className="size-5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
