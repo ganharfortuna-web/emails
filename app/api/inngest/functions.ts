@@ -7,7 +7,7 @@ import { prepararHtmlEmail } from "@/lib/email-html";
 export const processarFilaEmails = inngest.createFunction(
   { 
     id: "processar-fila-emails", 
-    concurrency: 1, // Impede que dois processos rodem ao mesmo tempo
+    concurrency: 1,
     triggers: [{ event: "campanha/iniciar" }] 
   },
   async ({ event, step }) => {
@@ -18,6 +18,16 @@ export const processarFilaEmails = inngest.createFunction(
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+
+    // ✅ 1. VERIFICA SE ESTÁ PAUSADA ANTES DE FAZER QUALQUER COISA
+    const statusCampanha = await step.run("checar-status", async () => {
+      const { data } = await supabase.from('campanhas').select('status').eq('id', campanhaId).single();
+      return data?.status;
+    });
+
+    if (statusCampanha === 'Pausada') {
+      return "Campanha pausada pelo usuário. Envio interrompido.";
+    }
 
     const conta = await step.run("buscar-smtp", async () => {
       const { data } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single();
@@ -32,7 +42,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(20); // 20 e-mails por lote para não sobrecarregar
+        .limit(20);
       return data || [];
     });
 
@@ -51,6 +61,8 @@ export const processarFilaEmails = inngest.createFunction(
       auth: { user: conta.email, pass: conta.app_password }, tls: { rejectUnauthorized: false },
       connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
     });
+
+    let enviadosComSucesso = 0;
 
     for (const item of lote) {
       await step.run(`enviar-${item.id}`, async () => {
@@ -71,17 +83,19 @@ export const processarFilaEmails = inngest.createFunction(
 
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
+          enviadosComSucesso++;
         } catch (err: any) {
-          // Se der erro de rate limit, joga de volta para pending e falha o lote
-          const isRateLimit = err.message?.includes('421') || err.message?.includes('429') || err.message?.includes('too many');
-          
-          if (isRateLimit) {
-            throw new Error("Rate Limit atingido. Vou pausar e tentar novamente."); // Força o Inngest a falhar a step e tentar de novo
-          } else {
-            await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
-          }
+          await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
         }
       });
+    }
+
+    // ✅ 2. SE O LOTE INTEIRO FALHAR, PARA O ENVIO PARA NÃO FAZER LOOP INFINITO
+    if (enviadosComSucesso === 0) {
+      await step.run("pausar-por-erro", async () => {
+        await supabase.from('campanhas').update({ status: 'Pausada' }).eq('id', campanhaId);
+      });
+      return "Lote inteiro falhou. Campanha pausada automaticamente por segurança.";
     }
 
     const restantes = await step.run("checar-restantes", async () => {
@@ -90,14 +104,9 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      // ✅ O SEGREDO: Espera 30 segundos antes de chamar o próximo lote
-      await step.sleep("aguardar-rate-limit", "30s");
-      
-      await step.sendEvent("continuar-envio", {
-        name: "campanha/iniciar",
-        data: { campanhaId },
-      });
-      return `Lote enviado. Restam ${restantes}. Aguardando 30s para o próximo lote.`;
+      await step.sleep("aguardar-rate-limit", "60s"); // Aumentei para 60s por segurança
+      await step.sendEvent("continuar-envio", { name: "campanha/iniciar", data: { campanhaId } });
+      return `Lote enviado. Restam ${restantes}. Aguardando 60s.`;
     }
 
     await step.run("marcar-como-enviada", async () => {
