@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, RotateCcw } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -55,7 +55,7 @@ export default function AutomacoesPage() {
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [modalReenvio, setModalReenvio] = useState<any>(null)
   const [novoTitulo, setNovoTitulo] = useState('')
-  const [modalDetalhes, setModalDetalhes] = useState<any>(null)
+  const [modalDetalhes, setModalDetalhes] = useState<any>(null) // ✅ Estado do modal restaurado
   const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
@@ -99,8 +99,7 @@ export default function AutomacoesPage() {
   const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     
-    // ✅ A MÁGICA: Transforma TODOS os e-mails que não foram enviados (sent) de volta para 'pending'
-    // Isso pega qualquer e-mail travado, com falha, ou erro e coloca de volta na fila.
+    // Força todos os não enviados a voltarem para pending
     await supabase.from('email_queue')
       .update({ status: 'pending', retry_count: 0, next_retry_at: null })
       .eq('campaign_id', campanhaId)
@@ -295,7 +294,6 @@ export default function AutomacoesPage() {
               const estaDisparando = processandoId === String(c.id)
               const corStatus = c.status === 'Pausada' ? 'bg-slate-200 text-slate-700' : c.status === 'Agendada' ? 'bg-purple-100 text-purple-700' : c.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : c.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               
-              // ✅ REGRA INFALÍVEL: Se o número de enviados for menor que o total, tem trabalho pendente!
               const temTrabalhoPendente = st.enviados < st.total;
               const faltam = st.total - st.enviados;
 
@@ -322,14 +320,12 @@ export default function AutomacoesPage() {
                         <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"><BarChart3 className="size-3" /> Desempenho</button>
                         <button onClick={() => reutilizarCampanha(c)} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"><Copy className="size-3" /> Reutilizar</button>
                         
-                        {/* ✅ BOTÃO DISPARAR (Garantido se enviados < total) */}
                         {temTrabalhoPendente && (
                           <button onClick={() => dispararCampanha(c.id)} disabled={estaDisparando} className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50 bg-blue-100 px-2 py-1 rounded">
                             {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Disparar
                           </button>
                         )}
                         
-                        {/* ✅ BOTÃO PAUSAR */}
                         {temTrabalhoPendente && (
                           <button onClick={() => alternarPausa(c)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1">
                             {c.status === 'Pausada' ? <Play className="size-3" /> : <Pause className="size-3" />} {c.status === 'Pausada' ? 'Retomar' : 'Pausar'}
@@ -344,6 +340,71 @@ export default function AutomacoesPage() {
           </div>
         </div>
       </div>
+
+      {/* ✅ MODAL DE DETALHES RESTAURADO */}
+      {modalDetalhes && (() => {
+        const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
+        const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
+        return (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden">
+              <div className="p-6 border-b bg-slate-50 flex justify-between items-center">
+                <h2 className="text-xl font-black text-slate-900 flex items-center gap-2"><BarChart3 className="size-5 text-indigo-600" /> Desempenho</h2>
+                <button onClick={() => setModalDetalhes(null)} className="text-slate-400 hover:text-slate-700"><X className="size-5" /></button>
+              </div>
+              <div className="p-6 space-y-6">
+                <div className="p-4 bg-slate-50 border rounded-xl">
+                  <div className="flex justify-between mb-3 text-sm font-bold text-slate-500"><span>Progresso</span><span>{st.enviados} / {st.total}</span></div>
+                  <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{ width: `${progresso}%` }} /></div>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-blue-50 p-3 rounded-xl text-center"><Send className="size-5 text-blue-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.enviados}</p><p className="text-[10px] font-bold text-slate-500">ENVIADOS</p></div>
+                  <div className="bg-emerald-50 p-3 rounded-xl text-center"><Eye className="size-5 text-emerald-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.abertos}</p><p className="text-[10px] font-bold text-slate-500">ABRIRAM</p></div>
+                  <div className="bg-purple-50 p-3 rounded-xl text-center"><MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.clicados}</p><p className="text-[10px] font-bold text-slate-500">CLICARAM</p></div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}><Eye className="size-4 mb-1 text-emerald-600"/><p className="text-xs font-bold text-slate-800">Abridores</p><p className="text-[10px] text-slate-500 font-medium">{st.abertos} contatos</p></button>
+                    <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}><MousePointerClick className="size-4 mb-1 text-purple-600"/><p className="text-xs font-bold text-slate-800">Clicadores</p><p className="text-[10px] text-slate-500 font-medium">{st.clicados} contatos</p></button>
+                    <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}><AlertCircle className="size-4 mb-1 text-amber-600"/><p className="text-xs font-bold text-slate-800">Não abriram</p><p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p></button>
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm text-slate-800" />
+                    <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm">{criandoLista ? 'Criando...' : 'Criar'}</button>
+                  </div>
+                  {msgSucesso && <p className="text-emerald-600 text-sm mt-2 font-bold">{msgSucesso}</p>}
+                </div>
+
+                <div className="border-t pt-4 flex gap-2">
+                  <button onClick={() => { setModalDetalhes(null); abrirModalReenvio(modalDetalhes) }} className="flex-1 bg-amber-50 text-amber-700 font-bold p-3 rounded-xl border border-amber-200 text-sm flex justify-center gap-2 hover:bg-amber-100"><RotateCcw className="size-4"/> Reenviar p/ não abriram</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ✅ MODAL DE REENVIO RESTAURADO */}
+      {modalReenvio && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="p-6 border-b bg-amber-50">
+              <h2 className="text-xl font-black text-amber-900 flex items-center gap-2"><RotateCcw className="size-5" /> Reenviar</h2>
+              <p className="text-amber-700 text-sm mt-1"><strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div><label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Pencil className="size-4 text-slate-500" /> Novo Assunto</label><input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)} className="w-full p-3 border rounded-xl text-slate-800" /></div>
+            </div>
+            <div className="p-6 border-t bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => setModalReenvio(null)} className="px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl">Cancelar</button>
+              <button onClick={confirmarReenvio} className="px-6 py-2.5 font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl flex items-center gap-2"><RotateCcw className="size-4" /> Reenviar agora</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
