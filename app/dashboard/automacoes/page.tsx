@@ -1,22 +1,37 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CheckCircle2, Target } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CheckCircle2, Target, CalendarClock } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
 // @ts-ignore
 import 'react-quill/dist/quill.snow.css'
 
+// ✅ RESTAURANDO AS FONTES E TAMANHOS DO EDITOR
 const ReactQuill = dynamic(async () => {
   const { default: RQ } = await import('react-quill')
+  const Quill = (await import('quill')).default
+  const Size = Quill.import('attributors/class/size') as any
+  Size.whitelist = ['10px', '11px', '12px', '13px', '14px', '15px', '16px', '18px', '20px', '22px', '24px', '28px', '32px']
+  Quill.register(Size, true)
+  const Font = Quill.import('attributors/class/font') as any
+  Font.whitelist = ['arial', 'helvetica', 'verdana', 'georgia', 'times-new-roman', 'courier-new', 'tahoma']
+  Quill.register(Font, true)
   return RQ
-}, { ssr: false, loading: () => <p className="p-4 text-slate-400 text-sm font-medium">Carregando editor visual...</p> })
+}, {
+  ssr: false,
+  loading: () => <p className="p-4 text-slate-400 text-sm font-medium">Carregando editor visual...</p>
+})
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
+// ✅ RESTAURANDO OS MÓDULOS COMPLETOS DO EDITOR
 const modulosEditor = {
   toolbar: [
+    [{ 'font': ['arial', 'helvetica', 'verdana', 'georgia', 'times-new-roman', 'courier-new', 'tahoma'] }],
+    [{ 'size': ['10px', '11px', '12px', '13px', '14px', '15px', '16px', '18px', '20px', '22px', '24px', '28px', '32px', false] }],
+    [{ 'header': [1, 2, 3, false] }],
     ['bold', 'italic', 'underline', 'strike'],
     [{ 'color': [] }, { 'background': [] }],
     [{ 'align': [] }],
@@ -112,24 +127,15 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  // =========================================================================
-  // ✅ LÓGICA INTELIGENTE DE DISPARO (Decide sozinho se usa API ou SMTP)
-  // =========================================================================
   const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     
     try {
       // 1. Verifica se existe alguma API ativa configurada
-      const { data: apiAtiva } = await supabase
-        .from('api_providers')
-        .select('id')
-        .eq('is_active', true)
-        .limit(1)
-
+      const { data: apiAtiva } = await supabase.from('api_providers').select('id').eq('is_active', true).limit(1)
       const usarAPI = apiAtiva && apiAtiva.length > 0
 
       if (usarAPI) {
-        // Envio via API Externa (Rápido, sem loop)
         const r = await fetch('/api/disparo/api-provider', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campanhaId }),
@@ -138,10 +144,7 @@ export default function AutomacoesPage() {
         if (!r.ok) throw new Error(j.error || 'Erro na API')
         alert(`✅ Campanha enviada para a API com sucesso!`)
       } else {
-        // Envio via SMTP (Loop de lotes)
-        let continuar = true
-        let enviados = 0
-        let falhas = 0
+        let continuar = true; let enviados = 0; let falhas = 0
         while (continuar) {
           try {
             const r = await fetch('/api/disparo/processar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId }) })
@@ -151,8 +154,7 @@ export default function AutomacoesPage() {
             }
             if (!r.ok) { alert(`⚠️ Erro: ${j.error}`); break }
             
-            falhas = 0
-            enviados += (j.enviados || 0)
+            falhas = 0; enviados += (j.enviados || 0)
             buscarCampanhas(true); carregarStats()
             
             if (j.done || j.restantes === 0) continuar = false
@@ -275,14 +277,19 @@ export default function AutomacoesPage() {
     if (!listaSelecionada || !assunto || !mensagem) { alert("Preencha todos os campos."); return }
     setEnviando(true)
 
-    const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ lista_id: listaSelecionada, assunto, mensagem, status: 'Em Fila' }]).select().single()
+    const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ 
+      lista_id: listaSelecionada, assunto, mensagem, status: 'Em Fila',
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null
+    }]).select().single()
+    
     if (error) { alert(`Erro: ${error.message}`); setEnviando(false); return }
 
     try {
       const r = await fetch('/api/disparo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) })
       if (!r.ok) { alert(`Erro ao enfileirar.`); setEnviando(false); return }
-      setEnviando(false); setAssunto(''); setMensagem(''); setListaSelecionada('')
-      buscarCampanhas(); dispararCampanha(novaCampanha.id)
+      setEnviando(false); setAssunto(''); setMensagem(''); setListaSelecionada(''); setScheduledAt('')
+      buscarCampanhas(); 
+      if (!scheduledAt) dispararCampanha(novaCampanha.id)
     } catch (err) { alert("Erro de conexão."); setEnviando(false) }
   }
 
@@ -313,11 +320,44 @@ export default function AutomacoesPage() {
                 {listas.map(l => <option key={l.id} value={l.id}>{l.nome} ({l.contatos[0]?.count || 0} leads)</option>)}
               </select>
               <input type="text" placeholder="Assunto do E-mail" value={assunto} onChange={e => setAssunto(e.target.value)} required className="w-full p-4 rounded-xl border text-slate-800" />
-              <div className="bg-white rounded-xl border overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:!text-black">
-                <ReactQuill theme="snow" value={mensagem} onChange={setMensagem} modules={modulosEditor} />
+              
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                  <CalendarClock className="size-4 text-slate-500" /> Agendar envio (opcional)
+                </label>
+                <input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)}
+                  className="bg-white w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium" />
+                <p className="text-xs text-slate-500 mt-1">Deixe vazio para processar assim que possível.</p>
               </div>
+
+              {/* ✅ EDITOR COM TODAS AS OPÇÕES DE FONTE E TAMANHO RESTAURADAS */}
+              <div className="bg-white rounded-xl border overflow-visible 
+                [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-toolbar]:rounded-t-xl
+                [&_.ql-container]:border-none [&_.ql-container]:rounded-b-xl
+                [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:text-slate-700 [&_.ql-editor]:text-base [&_.ql-editor]:!text-black
+                [&_.ql-tooltip]:!absolute [&_.ql-tooltip]:!bg-white [&_.ql-tooltip]:!text-slate-900 [&_.ql-tooltip]:!border [&_.ql-tooltip]:!border-slate-200 [&_.ql-tooltip]:!shadow-xl [&_.ql-tooltip]:!rounded-xl [&_.ql-tooltip]:!p-4 [&_.ql-tooltip]:!z-50
+                [&_.ql-tooltip_input]:!bg-white [&_.ql-tooltip_input]:!text-slate-900 [&_.ql-tooltip_input]:!border [&_.ql-tooltip_input]:!border-slate-300 [&_.ql-tooltip_input]:!rounded-md [&_.ql-tooltip_input]:!px-3 [&_.ql-tooltip_input]:!py-1.5 [&_.ql-tooltip_input]:!text-sm [&_.ql-tooltip_input]:focus:!outline-none [&_.ql-tooltip_input]:focus:!border-blue-500 [&_.ql-tooltip_input]:focus:!ring-1 [&_.ql-tooltip_input]:focus:!ring-blue-500
+                [&_.ql-tooltip_a]:!text-blue-600 [&_.ql-tooltip_a]:!font-bold [&_.ql-tooltip_a]:!ml-2 [&_.ql-tooltip_a]:hover:!underline
+                [&_.ql-picker]:!text-slate-700
+                [&_.ql-picker-label]:!text-slate-700 [&_.ql-picker-label]:hover:!text-slate-900
+                [&_.ql-picker-options]:!bg-white [&_.ql-picker-options]:!border [&_.ql-picker-options]:!border-slate-200 [&_.ql-picker-options]:!shadow-lg [&_.ql-picker-options]:!rounded-lg
+                [&_.ql-stroke]:!stroke-slate-600
+                [&_.ql-fill]:!fill-slate-600
+                [&_.ql-picker-item]:!text-slate-700
+                [&_.ql-active_.ql-stroke]:!stroke-blue-600
+                [&_.ql-active_.ql-fill]:!fill-blue-600
+              ">
+                <ReactQuill 
+                  theme="snow" 
+                  value={mensagem} 
+                  onChange={setMensagem} 
+                  modules={modulosEditor}
+                  placeholder="Escreva o corpo do seu e-mail aqui..." 
+                />
+              </div>
+
               <button type="submit" disabled={enviando} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl flex justify-center gap-2">
-                {enviando ? <Loader2 className="animate-spin" /> : <Send />} {enviando ? 'Processando...' : 'Enviar Campanha'}
+                {enviando ? <Loader2 className="animate-spin" /> : <Send />} {enviando ? 'Processando...' : scheduledAt ? 'Agendar Campanha' : 'Enviar Campanha'}
               </button>
             </div>
           </form>
@@ -347,7 +387,7 @@ export default function AutomacoesPage() {
               const st = stats[String(c.id)] || STATS_VAZIO
               const sel = selecionadas.has(c.id)
               const estaDisparando = processandoId === String(c.id)
-              const corStatus = c.status === 'Pausada' ? 'bg-slate-200 text-slate-700' : c.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : c.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              const corStatus = c.status === 'Pausada' ? 'bg-slate-200 text-slate-700' : c.status === 'Agendada' ? 'bg-purple-100 text-purple-700' : c.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : c.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
 
               return (
                 <div key={c.id} className={`p-4 rounded-xl border transition-colors ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'}`}>
@@ -371,7 +411,6 @@ export default function AutomacoesPage() {
                         <span className="text-purple-600 flex items-center gap-1"><MousePointerClick className="size-3"/> {st.clicados}</span>
                       </div>
 
-                      {/* ✅ BOTOES RESTAURADOS E CORRIGIDOS */}
                       <div className="flex items-center gap-3 flex-wrap">
                         <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1">
                           <BarChart3 className="size-3" /> Desempenho
@@ -379,7 +418,7 @@ export default function AutomacoesPage() {
                         <button onClick={() => reutilizarCampanha(c)} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1">
                           <Copy className="size-3" /> Reutilizar
                         </button>
-                        {st.pendentes > 0 && c.status !== 'Pausada' && (
+                        {st.pendentes > 0 && c.status !== 'Pausada' && c.status !== 'Agendada' && (
                           <button onClick={() => dispararCampanha(c.id)} disabled={estaDisparando} className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
                             {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Disparar
                           </button>
@@ -397,7 +436,6 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* MODAL DE DETALHES (Desempenho) */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
@@ -457,7 +495,6 @@ export default function AutomacoesPage() {
         )
       })()}
 
-      {/* MODAL DE REENVIO */}
       {modalReenvio && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
