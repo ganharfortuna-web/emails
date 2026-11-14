@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, RotateCcw, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, Rocket, PlayCircle } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -95,18 +95,16 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  // ✅ DISPARO: Tenta o Inngest, se falhar, avisa.
   const dispararCampanha = async (campanhaId: string | number, forceManual = false) => {
     setProcessandoId(String(campanhaId))
-    
     try {
       if (!forceManual) {
         const r = await fetch('/api/disparo/iniciar', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campanhaId }),
         })
-        if (!r.ok) throw new Error("Erro ao acionar o Inngest. Verifique as chaves na Vercel.")
-        alert(`🚀 Envio automático iniciado! O Inngest está processando os e-mails em background.`)
+        if (!r.ok) throw new Error("Erro no Inngest. Tente o Manual.")
+        alert(`🚀 Envio automático iniciado! Pode fechar a aba.`)
       } else {
         let continuar = true, falhas = 0
         while (continuar) {
@@ -127,7 +125,7 @@ export default function AutomacoesPage() {
       }
       buscarCampanhas(true); carregarStats()
     } catch (err: any) {
-      alert(`⚠️ Erro no envio automático: ${err.message}\n\nUse o botão 'Manual (SMTP)' para forçar o envio.`)
+      alert(`⚠️ Erro no envio: ${err.message}`)
     }
     setProcessandoId(null)
   }
@@ -214,7 +212,6 @@ export default function AutomacoesPage() {
       if (!r.ok) { alert(`Erro ao enfileirar.`); setEnviando(false); return }
       setEnviando(false); setAssunto(''); setMensagem(''); setListaSelecionada(''); setScheduledAt('')
       buscarCampanhas(); 
-      // ✅ AQUI É O PULO DO GATO: Quando você clica em "Enviar Campanha", ele já chama o Inngest sozinho!
       if (!scheduledAt) dispararCampanha(novaCampanha.id, false) 
     } catch (err) { alert("Erro de conexão."); setEnviando(false) }
   }
@@ -297,18 +294,19 @@ export default function AutomacoesPage() {
                         <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"><BarChart3 className="size-3" /> Desempenho</button>
                         <button onClick={() => reutilizarCampanha(c)} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"><Copy className="size-3" /> Reutilizar</button>
                         
-                        {/* ✅ BOTÕES DE EMERGÊNCIA */}
+                        {/* ✅ BOTÕES DE DISPARO GARANTIDOS */}
                         {c.status !== 'Enviada' && st.pendentes > 0 && (
                           <>
                             <button onClick={() => dispararCampanha(c.id, false)} disabled={estaDisparando} className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
                               {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Rocket className="size-3"/>} Inngest
                             </button>
                             <button onClick={() => dispararCampanha(c.id, true)} disabled={estaDisparando} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 disabled:opacity-50">
-                              {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Manual (SMTP)
+                              {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Manual
                             </button>
                           </>
                         )}
                         
+                        {/* ✅ BOTÃO PAUSAR SÓ APARECE SE NÃO ESTIVER ENVIADA */}
                         {c.status !== 'Enviada' && (
                           <button onClick={() => alternarPausa(c)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1">
                             {c.status === 'Pausada' ? <Play className="size-3" /> : <Pause className="size-3" />} {c.status === 'Pausada' ? 'Retomar' : 'Pausar'}
