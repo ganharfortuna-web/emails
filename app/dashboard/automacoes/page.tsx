@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -58,7 +58,10 @@ export default function AutomacoesPage() {
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
   const [modalErros, setModalErros] = useState<any>(null)
   const [listaErros, setListaErros] = useState<any[]>([])
-  const [tipoSegmento, setTipoSegmento] = useState<'abridores' | 'clicadores' | 'nao_abriram'>('abridores')
+  
+  // ✅ NOVO TIPO 'enviados' ADICIONADO AQUI
+  const [tipoSegmento, setTipoSegmento] = useState<'enviados' | 'abridores' | 'clicadores' | 'nao_abriram'>('enviados')
+  
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
   const [msgSucesso, setMsgSucesso] = useState('')
@@ -279,26 +282,73 @@ export default function AutomacoesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // ✅ LÓGICA DE CRIAÇÃO DE SEGMENTO ATUALIZADA COM A OPÇÃO 'ENVIADOS'
   const criarSegmento = async () => {
     if (!modalDetalhes || !nomeNovaLista.trim()) { alert('Digite um nome.'); return }
     setCriandoLista(true); setMsgSucesso('')
+    
     try {
-      let query = supabase.from('email_queue').select('recipient_email, recipient_name, opened_at, clicked_at').eq('campaign_id', modalDetalhes.id)
-      if (tipoSegmento === 'abridores') query = query.not('opened_at', 'is', null)
-      else if (tipoSegmento === 'clicadores') query = query.not('clicked_at', 'is', null)
-      else if (tipoSegmento === 'nao_abriram') query = query.eq('status', 'sent').is('opened_at', null)
-      
-      const { data: itens } = await query
-      if (!itens || itens.length === 0) { alert('Nenhum contato encontrado neste segmento.'); setCriandoLista(false); return }
+      let todosContatos: any[] = []
+      let page = 0
+      const pageSize = 1000
+      let hasMore = true
+
+      // Busca paginada para não travar o navegador
+      while (hasMore) {
+        let query = supabase.from('email_queue')
+          .select('recipient_email, recipient_name, opened_at, clicked_at, status')
+          .eq('campaign_id', modalDetalhes.id)
+          .range(page * pageSize, (page + 1) * pageSize - 1)
+
+        if (tipoSegmento === 'enviados') {
+          query = query.eq('status', 'sent')
+        } else if (tipoSegmento === 'abridores') {
+          query = query.not('opened_at', 'is', null)
+        } else if (tipoSegmento === 'clicadores') {
+          query = query.not('clicked_at', 'is', null)
+        } else if (tipoSegmento === 'nao_abriram') {
+          query = query.eq('status', 'sent').is('opened_at', null)
+        }
+
+        const { data, error } = await query
+        if (error) throw error
+
+        if (data && data.length > 0) {
+          todosContatos = [...todosContatos, ...data]
+          if (data.length < pageSize) hasMore = false
+          else page++
+        } else { hasMore = false }
+      }
+
+      if (todosContatos.length === 0) { 
+        alert('Nenhum contato encontrado neste segmento.'); 
+        setCriandoLista(false); 
+        return 
+      }
       
       const { data: novaLista } = await supabase.from('listas').insert([{ nome: nomeNovaLista.trim() }]).select().single()
       if (!novaLista) { setCriandoLista(false); return }
 
       const vistos = new Set<string>()
-      const novosContatos = itens.filter(i => { const e = (i.recipient_email || '').toLowerCase(); if (!e || vistos.has(e)) return false; vistos.add(e); return true }).map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: novaLista.id, status: 'ativo' }))
+      const novosContatos = todosContatos.filter(i => { 
+        const e = (i.recipient_email || '').toLowerCase(); 
+        if (!e || vistos.has(e)) return false; 
+        vistos.add(e); 
+        return true 
+      }).map(i => ({ 
+        nome: i.recipient_name || 'Lead', 
+        email: (i.recipient_email || '').toLowerCase(), 
+        lista_id: novaLista.id, 
+        status: 'ativo' 
+      }))
       
-      await supabase.from('contatos').upsert(novosContatos, { onConflict: 'email' })
-      setMsgSucesso(`✅ Lista criada com ${novosContatos.length} contatos!`)
+      // Insere em blocos para não dar timeout
+      for (let i = 0; i < novosContatos.length; i += 500) {
+        const bloco = novosContatos.slice(i, i + 500)
+        await supabase.from('contatos').upsert(bloco, { onConflict: 'email' })
+      }
+
+      setMsgSucesso(`✅ Lista "${nomeNovaLista.trim()}" criada com ${novosContatos.length} contatos!`)
       setNomeNovaLista(''); buscarListas()
     } catch (e: any) { alert('Erro: ' + e.message) }
     setCriandoLista(false)
@@ -381,7 +431,6 @@ export default function AutomacoesPage() {
               const sel = selecionadas.has(c.id)
               const estaDisparando = processandoId === String(c.id)
               
-              // ✅ NOVA LÓGICA VISUAL: Só diz "Enviando" se ainda tem gente na fila.
               const temTrabalhoPendente = st.pendentes > 0; 
               const temFalhas = st.falhados > 0;
 
@@ -398,7 +447,7 @@ export default function AutomacoesPage() {
                 displayStatus = 'Enviando...';
                 corStatus = 'bg-cyan-100 text-cyan-700';
               } else if (temFalhas) {
-                displayStatus = 'Finalizada c/ Erros'; // ✅ Se a fila acabou e tem erros, muda o status
+                displayStatus = 'Finalizada c/ Erros';
                 corStatus = 'bg-red-100 text-red-700';
               } else {
                 displayStatus = 'Enviada';
@@ -413,7 +462,6 @@ export default function AutomacoesPage() {
                       <div className="flex justify-between mb-2">
                         <span className={`text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1 ${corStatus}`}>
                           <Hourglass className="size-3" /> {displayStatus} 
-                          {/* ✅ Só mostra "restam" se estiver pending */}
                           {temTrabalhoPendente && <span className="ml-1 opacity-70">({st.pendentes} restam)</span>}
                         </span>
                       </div>
@@ -437,7 +485,6 @@ export default function AutomacoesPage() {
                           </button>
                         )}
                         
-                        {/* ✅ ÚNICO BOTÃO DE ERRO (Ver Erros) */}
                         {st.falhados > 0 && (
                           <button onClick={() => abrirModalErros(c)} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded">
                             <ShieldAlert className="size-3"/> Ver Erros ({st.falhados})
@@ -459,7 +506,7 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* ✅ MODAL DE ERROS (LISTA OS EMAILS) */}
+      {/* MODAL DE ERROS */}
       {modalErros && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[80vh]">
@@ -498,7 +545,7 @@ export default function AutomacoesPage() {
         </div>
       )}
 
-      {/* MODAIS (DESEMPENHO E REENVIO) */}
+      {/* MODAL DE DESEMPENHO (AQUI ESTÁ A NOVA OPÇÃO 'ENVIADOS') */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
@@ -523,14 +570,39 @@ export default function AutomacoesPage() {
 
                 <div className="border-t pt-4">
                   <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}><Eye className="size-4 mb-1 text-emerald-600"/><p className="text-xs font-bold text-slate-800">Abridores</p><p className="text-[10px] text-slate-500 font-medium">{st.abertos} contatos</p></button>
-                    <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}><MousePointerClick className="size-4 mb-1 text-purple-600"/><p className="text-xs font-bold text-slate-800">Clicadores</p><p className="text-[10px] text-slate-500 font-medium">{st.clicados} contatos</p></button>
-                    <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}><AlertCircle className="size-4 mb-1 text-amber-600"/><p className="text-xs font-bold text-slate-800">Não abriram</p><p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p></button>
+                  
+                  {/* GRID AGORA TEM 4 COLUNAS PARA CABER A OPÇÃO 'ENVIADOS' */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                    <button onClick={() => setTipoSegmento('enviados')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'enviados' ? 'border-blue-500 bg-blue-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <Send className="size-4 mb-1 text-blue-600"/>
+                      <p className="text-xs font-bold text-slate-800">Enviados</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{st.enviados} contatos</p>
+                    </button>
+
+                    <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <Eye className="size-4 mb-1 text-emerald-600"/>
+                      <p className="text-xs font-bold text-slate-800">Abridores</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{st.abertos} contatos</p>
+                    </button>
+
+                    <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <MousePointerClick className="size-4 mb-1 text-purple-600"/>
+                      <p className="text-xs font-bold text-slate-800">Clicadores</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{st.clicados} contatos</p>
+                    </button>
+
+                    <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <AlertCircle className="size-4 mb-1 text-amber-600"/>
+                      <p className="text-xs font-bold text-slate-800">Não abriram</p>
+                      <p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p>
+                    </button>
                   </div>
+
                   <div className="flex gap-2">
                     <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm text-slate-800" />
-                    <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm">{criandoLista ? 'Criando...' : 'Criar'}</button>
+                    <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm">
+                      {criandoLista ? <Loader2 className="size-4 animate-spin" /> : 'Criar'}
+                    </button>
                   </div>
                   {msgSucesso && <p className="text-emerald-600 text-sm mt-2 font-bold">{msgSucesso}</p>}
                 </div>
