@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { Plus, Edit, Trash2, Users, Loader2, Save, X } from 'lucide-react'
+import { Plus, Edit, Trash2, Users, Loader2, Save, X, AlertTriangle } from 'lucide-react'
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
@@ -23,7 +23,6 @@ export default function ListasPage() {
 
   const carregarListas = async () => {
     setCarregando(true)
-    // Puxa as listas e conta quantos contatos têm em cada uma
     const { data, error } = await supabase
       .from('listas')
       .select('*, contatos(count)')
@@ -33,35 +32,38 @@ export default function ListasPage() {
     setCarregando(false)
   }
 
-  // ✅ FUNÇÃO DE EXCLUSÃO CORRIGIDA
+  // ✅ FUNÇÃO DE EXCLUSÃO TOTAL (LISTA, CAMPANHAS, CONTATOS E FILA)
   const deletarLista = async (id: string, nome: string, qtdContatos: number) => {
-    const msg = `⚠️ ATENÇÃO: Você está prestes a apagar a lista "${nome}".\n\nTodos os ${qtdContatos} contatos vinculados a ela também serão APAGADOS permanentemente do sistema.\n\nTem certeza que deseja continuar?`
+    const msg = `🚨 ATENÇÃO MÁXIMA 🚨\n\nVocê está prestes a apagar a lista "${nome}".\n\nIsso vai apagar PERMANENTEMENTE:\n- Os ${qtdContatos} contatos desta lista\n- TODAS as campanhas que usaram esta lista\n- O histórico de envios dessas campanhas\n\nTem certeza absoluta que deseja continuar?`
     
     if (!confirm(msg)) return
     
     setDeletandoId(id)
     try {
-      // 1. Deleta os contatos vinculados a esta lista primeiro
-      const { error: errContatos } = await supabase
-        .from('contatos')
-        .delete()
-        .eq('lista_id', id)
+      // 1. Buscar as campanhas que usam essa lista
+      const { data: campanhas } = await supabase.from('campanhas').select('id').eq('lista_id', id)
+      const campanhaIds = campanhas?.map(c => c.id) || []
 
-      if (errContatos) throw new Error("Erro ao deletar contatos: " + errContatos.message)
+      // 2. Apagar a Fila de Emails dessas campanhas
+      if (campanhaIds.length > 0) {
+        await supabase.from('email_queue').delete().in('campaign_id', campanhaIds)
+      }
 
-      // 2. Agora que não há mais contatos vinculados, deleta a lista
-      const { error: errLista } = await supabase
-        .from('listas')
-        .delete()
-        .eq('id', id)
+      // 3. Apagar as Campanhas
+      await supabase.from('campanhas').delete().eq('lista_id', id)
 
-      if (errLista) throw new Error("Erro ao deletar lista: " + errLista.message)
+      // 4. Apagar os Contatos da Lista
+      await supabase.from('contatos').delete().eq('lista_id', id)
 
-      // 3. Atualiza a tela
+      // 5. Apagar a Lista
+      const { error: errLista } = await supabase.from('listas').delete().eq('id', id)
+      if (errLista) throw new Error(errLista.message)
+
+      // Atualiza a tela
       setListas(listas.filter(l => l.id !== id))
       
     } catch (err: any) {
-      alert(err.message)
+      alert("Erro ao deletar: " + err.message)
     }
     setDeletandoId(null)
   }
