@@ -5,10 +5,10 @@ import { classificarErro, calcularProximaTentativa } from '@/lib/bounce'
 import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60; // ✅ Permite que a Vercel rode por até 60 segundos
+export const maxDuration = 60; 
 
-// ✅ Aumentado para 30 e-mails por minuto
-const BATCH_SIZE = 30
+// ✅ Reduzido para 15 e-mails para responder rápido e não dar timeout no cron-job.org
+const BATCH_SIZE = 15
 
 export async function GET(request: Request) { return handleCron(request) }
 
@@ -29,7 +29,6 @@ async function handleCron(request: Request) {
   const supabase = createClient(supabaseUrl!, supabaseKey!)
 
   try {
-    // 1. Verifica se a conta SMTP está ativa e qual o limite
     const { data: contas } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).order('sent_today', { ascending: true }).limit(1)
     if (!contas || contas.length === 0) return NextResponse.json({ message: 'Sem contas ativas.' })
     
@@ -38,18 +37,15 @@ async function handleCron(request: Request) {
       return NextResponse.json({ message: 'Limite diário atingido.' })
     }
 
-    // 2. Busca e-mails pendentes na fila
-    const { data: filaRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100)
+    const { data: filaRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(50)
     if (!filaRaw || filaRaw.length === 0) return NextResponse.json({ message: 'Fila vazia.' })
 
-    // 3. Filtra descadastrados
     const { data: suprimidos } = await supabase.from('suppression_list').select('email')
     const emailsSuprimidos = new Set((suprimidos || []).map(s => (s.email || '').toLowerCase()))
 
     const filaFiltrada = filaRaw.filter(i => !emailsSuprimidos.has((i.recipient_email || '').toLowerCase())).slice(0, BATCH_SIZE)
     if (filaFiltrada.length === 0) return NextResponse.json({ message: 'Sem elegíveis.' })
 
-    // 4. Configura o envio
     const transporter = nodemailer.createTransport({
       host: conta.host || 'smtp.gmail.com', 
       port: Number(conta.port) || 587,
@@ -62,7 +58,6 @@ async function handleCron(request: Request) {
     let enviados = 0
     const campaignIds = new Set<string | number>()
 
-    // 5. Loop de envio
     for (const item of filaFiltrada) {
       try {
         let corpo = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
@@ -100,7 +95,6 @@ async function handleCron(request: Request) {
       }
     }
 
-    // 6. Atualiza o contador e o status da campanha
     if (enviados > 0) await supabase.from('smtp_accounts').update({ sent_today: conta.sent_today }).eq('id', conta.id)
     
     for (const cid of campaignIds) {
