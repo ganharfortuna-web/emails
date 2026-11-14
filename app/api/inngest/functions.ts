@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
-// ✅ 1. FUNÇÃO PRINCIPAL DE ENVIO
+// ==========================================
+// 1. FUNÇÃO PRINCIPAL DE ENVIO (Loop Automático)
+// ==========================================
 export const processarFilaEmails = inngest.createFunction(
   { 
     id: "processar-fila-emails", 
@@ -105,17 +107,21 @@ export const processarFilaEmails = inngest.createFunction(
   }
 );
 
-// ✅ 2. O CÃO DE GUARDA (Roda sozinho a cada 10 minutos)
-// Se ele achar uma campanha "Enviando..." que ficou presa, ele chuta o processo de volta
+// ==========================================
+// 2. O CÃO DE GUARDA (Inngest Cron Nativo)
+// ==========================================
 export const autoRecuperacao = inngest.createFunction(
-  { id: "auto-recuperacao" },
-  { cron: "*/10 * * * *" }, // A cada 10 minutos
-  async ({ step }) => {
+  { 
+    id: "auto-recuperacao",
+    concurrency: 1,
+    // ✅ CORREÇÃO AQUI: O cron agora fica dentro do primeiro objeto como 'triggers'
+    triggers: [{ cron: "*/10 * * * *" }]
+  },
+  async ({ step }) => { // ✅ Apenas dois argumentos agora
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
     const campanhasParadas = await step.run("buscar-campanhas-paradas", async () => {
-      // Busca campanhas que estão como "Enviando..." há mais de 15 minutos
-      const dataLimite = new Date(Date.now() - 15 * 60000).toISOString();
+      const dataLimite = new Date(Date.now() - 10 * 60000).toISOString();
       const { data } = await supabase
         .from('campanhas')
         .select('id')
@@ -129,7 +135,6 @@ export const autoRecuperacao = inngest.createFunction(
     }
 
     for (const camp of campanhasParadas) {
-      // Verifica se ainda tem gente pendente na fila
       const { count } = await supabase
         .from('email_queue')
         .select('*', { count: 'exact', head: true })
@@ -137,7 +142,6 @@ export const autoRecuperacao = inngest.createFunction(
         .eq('status', 'pending');
 
       if (count && count > 0) {
-        // Se tem gente pendente, acorda o Inngest novamente!
         await step.sendEvent("reativar-envio", {
           name: "campanha/iniciar",
           data: { campanhaId: camp.id },
@@ -145,6 +149,6 @@ export const autoRecuperacao = inngest.createFunction(
       }
     }
 
-    return `Reativando ${campanhasParadas.length} campanhas travadas.`;
+    return `Reativando ${campanhasParadas.length} campanhas que estavam travadas.`;
   }
 );
