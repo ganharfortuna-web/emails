@@ -1,7 +1,6 @@
 import { inngest } from "@/lib/inngest";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
-import { classificarErro, calcularProximaTentativa } from "@/lib/bounce";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
 export const processarFilaEmails = inngest.createFunction(
@@ -41,7 +40,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(20); // Lotes de 20
+        .limit(30); // ✅ Aumentado para 30
       return data || [];
     });
 
@@ -55,10 +54,19 @@ export const processarFilaEmails = inngest.createFunction(
       return "Fila vazia. Campanha finalizada.";
     }
 
+    // ✅ AQUI ESTÁ O SEGREDO DA VELOCIDADE: pool: true
     const transporter = nodemailer.createTransport({
-      host: conta.host, port: Number(conta.port), secure: Number(conta.port) === 465,
-      auth: { user: conta.email, pass: conta.app_password }, tls: { rejectUnauthorized: false },
-      connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
+      pool: true, // Reutiliza a conexão
+      maxConnections: 5, // Até 5 conexões simultâneas
+      maxMessages: 100, // Envia até 100 e-mails por conexão antes de reciclar
+      host: conta.host, 
+      port: Number(conta.port), 
+      secure: Number(conta.port) === 465,
+      auth: { user: conta.email, pass: conta.app_password }, 
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 15000, 
+      greetingTimeout: 15000, 
+      socketTimeout: 20000,
     });
 
     let enviadosComSucesso = 0;
@@ -102,10 +110,10 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      // ✅ PAUSA DE 60 SEGUNDOS OBRIGATÓRIA ANTES DE MANDAR O PRÓXIMO LOTE
-      await step.sleep("aguardar-rate-limit", "60s");
+      // ✅ Reduzido para 2 segundos apenas para aliviar a Vercel, mas manter a velocidade
+      await step.sleep("aguardar-rate-limit", "2s");
       await step.sendEvent("continuar-envio", { name: "campanha/iniciar", data: { campanhaId } });
-      return `Lote enviado. Restam ${restantes}. Aguardando 60s para o próximo.`;
+      return `Lote enviado. Restam ${restantes}.`;
     }
 
     await step.run("marcar-como-enviada", async () => {
