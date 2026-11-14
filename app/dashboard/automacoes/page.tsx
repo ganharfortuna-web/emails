@@ -83,86 +83,74 @@ export default function AutomacoesPage() {
   const carregarStats = async () => {
     const novasStats: Record<string, StatsItem> = {}
     for (const c of campanhas) {
-      const [tot, env, pend, fail, ab, cli] = await Promise.all([
-        supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id),
+      // Agora o sistema busca o TOTAL apenas dos que não foram suprimidos pelo sistema
+      const { count: totalValido } = await supabase.from('email_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', c.id)
+        .neq('status', 'suppressed'); // Ignora os suprimidos na contagem
+
+      const [env, pend, fail, ab, cli] = await Promise.all([
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'sent'),
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'pending'),
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'failed'),
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).not('opened_at', 'is', null),
         supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', c.id).not('clicked_at', 'is', null)
       ])
-      novasStats[String(c.id)] = { total: tot.count || 0, enviados: env.count || 0, pendentes: pend.count || 0, falhados: fail.count || 0, abertos: ab.count || 0, clicados: cli.count || 0 }
+
+      // O Total agora é a soma dos enviados + falhados (excluindo os suprimidos do banco)
+      const total = (env.count || 0) + (fail.count || 0) + (pend.count || 0);
+
+      novasStats[String(c.id)] = { 
+        total: total, 
+        enviados: env.count || 0, 
+        pendentes: pend.count || 0, 
+        falhados: fail.count || 0, 
+        abertos: ab.count || 0, 
+        clicados: cli.count || 0 
+      }
     }
     setStats(novasStats)
   }
 
-  // ✅ BOTÃO DISPARAR INTELIGENTE (Tenta Inngest, se falhar faz o loop manual)
   const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
     
-    // Reseta os e-mails com erro/falha para pending
     await supabase.from('email_queue')
       .update({ status: 'pending', retry_count: 0, next_retry_at: null })
       .eq('campaign_id', campanhaId)
-      .neq('status', 'sent');
+      .eq('status', 'failed'); // Só reseta os que realmente falharam
 
     await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
     buscarCampanhas(true); carregarStats()
 
     try {
-      // Tenta disparar via Inngest
       const r = await fetch('/api/disparo/iniciar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campanhaId }),
       })
-      
       if (r.ok) {
-        alert("🚀 Envio automático iniciado em background! O Inngest vai processar a fila. Você pode fechar esta aba.")
-        setProcessandoId(null)
-        buscarCampanhas(true); carregarStats()
-        return
+        alert("🚀 Envio automático iniciado em background! O Inngest vai processar a fila.")
+        setProcessandoId(null); buscarCampanhas(true); carregarStats(); return
       }
-    } catch (err) {
-      console.log("Inngest falhou, tentando manual...", err)
-    }
+    } catch (err) { console.log("Inngest falhou.") }
 
-    // Fallback: Loop Manual (Caso o Inngest não esteja respondendo)
-    alert("Inngest indisponível. Iniciando envio manual (mantenha a aba aberta).")
-    let continuar = true
-    let falhas = 0
-
+    // Fallback manual
+    let continuar = true, falhas = 0
     while (continuar) {
       try {
         const r = await fetch('/api/disparo/processar', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campanhaId }),
         })
-        
-        if (r.status === 504 || r.status === 502) {
-          falhas++; if (falhas > 10) break
-          await new Promise(res => setTimeout(res, 3000)); continue
-        }
-
+        if (r.status === 504 || r.status === 502) { falhas++; if (falhas > 10) break; await new Promise(res => setTimeout(res, 3000)); continue }
         if (!r.ok) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 3000)); continue }
-        
         const j = await r.json()
         falhas = 0 
-
-        if (j.done || j.restantes === 0) {
-          continuar = false
-        } else {
-          await new Promise(res => setTimeout(res, 1500))
-        }
-      } catch (err) {
-        falhas++
-        if (falhas > 5) break
-        await new Promise(res => setTimeout(res, 3000))
-      }
+        if (j.done || j.restantes === 0) continuar = false
+        else await new Promise(res => setTimeout(res, 1500))
+      } catch (err) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 3000)) }
     }
-
-    setProcessandoId(null)
-    buscarCampanhas(true); carregarStats()
-    alert(`✅ Envio manual finalizado.`)
+    setProcessandoId(null); buscarCampanhas(true); carregarStats()
   }
 
   const toggleSelecionada = (id: string) => { const novo = new Set(selecionadas); novo.has(id) ? novo.delete(id) : novo.add(id); setSelecionadas(novo) }
@@ -249,12 +237,8 @@ export default function AutomacoesPage() {
       buscarCampanhas(); 
       
       if (!scheduledAt) {
-        // Tenta disparar automaticamente pelo Inngest
-        try {
-          await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) })
-        } catch(e) { 
-          console.log("Inngest falhou, use o botão disparar manual.") 
-        }
+        try { await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) }) } 
+        catch(e) { console.log("Inngest falhou.") }
       }
     } catch (err) { alert("Erro de conexão."); setEnviando(false) }
   }
@@ -315,10 +299,17 @@ export default function AutomacoesPage() {
               const st = stats[String(c.id)] || STATS_VAZIO
               const sel = selecionadas.has(c.id)
               const estaDisparando = processandoId === String(c.id)
-              const corStatus = c.status === 'Pausada' ? 'bg-slate-200 text-slate-700' : c.status === 'Agendada' ? 'bg-purple-100 text-purple-700' : c.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : c.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               
+              const temFalhas = st.falhados > 0;
               const temTrabalhoPendente = st.enviados < st.total;
               const faltam = st.total - st.enviados;
+
+              const displayStatus = temFalhas ? 'Com Erros' : c.status;
+              const corStatus = displayStatus === 'Pausada' ? 'bg-slate-200 text-slate-700' : 
+                                displayStatus === 'Agendada' ? 'bg-purple-100 text-purple-700' : 
+                                displayStatus === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : 
+                                displayStatus === 'Com Erros' ? 'bg-red-100 text-red-700' : 
+                                displayStatus === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
 
               return (
                 <div key={c.id} className={`p-4 rounded-xl border transition-colors ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'}`}>
@@ -327,7 +318,7 @@ export default function AutomacoesPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between mb-2">
                         <span className={`text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1 ${corStatus}`}>
-                          <Hourglass className="size-3" /> {c.status} 
+                          <Hourglass className="size-3" /> {displayStatus} 
                           {temTrabalhoPendente && <span className="ml-1 opacity-70">({faltam} restam)</span>}
                         </span>
                       </div>
@@ -364,7 +355,6 @@ export default function AutomacoesPage() {
         </div>
       </div>
 
-      {/* MODAL DE DETALHES */}
       {modalDetalhes && (() => {
         const st = stats[String(modalDetalhes.id)] || STATS_VAZIO
         const progresso = st.total > 0 ? Math.round((st.enviados / st.total) * 100) : 0
@@ -410,7 +400,6 @@ export default function AutomacoesPage() {
         )
       })()}
 
-      {/* MODAL DE REENVIO */}
       {modalReenvio && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
