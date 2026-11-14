@@ -64,7 +64,7 @@ export default function AutomacoesPage() {
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
   useEffect(() => { buscarListas(); buscarCampanhas(); }, [])
-  useEffect(() => { const id = setInterval(() => buscarCampanhas(true), 10000); return () => clearInterval(id); }, [])
+  useEffect(() => { const id = setInterval(() => buscarCampanhas(true), 5000); return () => clearInterval(id); }, [])
   useEffect(() => { if (campanhas.length > 0) carregarStats(); }, [campanhas])
 
   const buscarListas = async () => {
@@ -95,39 +95,51 @@ export default function AutomacoesPage() {
     setStats(novasStats)
   }
 
-  const dispararCampanha = async (campanhaId: string | number, forceManual = false) => {
+  // ✅ BOTÃO DISPARAR ÚNICO E À PROVA DE FALHAS
+  const dispararCampanha = async (campanhaId: string | number) => {
     setProcessandoId(String(campanhaId))
-    try {
-      if (!forceManual) {
-        const r = await fetch('/api/disparo/iniciar', {
+    
+    // Força o status de volta para 'Enviando...' no banco
+    await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', campanhaId)
+    buscarCampanhas(true)
+
+    let continuar = true
+    let falhas = 0
+
+    while (continuar) {
+      try {
+        const r = await fetch('/api/disparo/processar', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campanhaId }),
         })
-        if (!r.ok) throw new Error("Erro no Inngest. Tente o Manual.")
-        alert(`🚀 Envio automático iniciado! Pode fechar a aba.`)
-      } else {
-        let continuar = true, falhas = 0
-        while (continuar) {
-          const r = await fetch('/api/disparo/processar', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ campanhaId }),
-          })
-          if (r.status === 504 || r.status === 502) {
-            falhas++; if (falhas > 5) break
-            await new Promise(res => setTimeout(res, 3000)); continue
-          }
-          if (!r.ok) break
-          const j = await r.json()
-          if (j.done || j.restantes === 0 || j.enviados === 0) continuar = false
-          else await new Promise(res => setTimeout(res, 1500))
+        
+        // Se a Vercel der timeout, tenta de novo sem quebrar o loop
+        if (r.status === 504 || r.status === 502) {
+          falhas++; if (falhas > 10) break
+          await new Promise(res => setTimeout(res, 3000)); continue
         }
-        alert(`✅ Disparo manual finalizado!`)
+
+        if (!r.ok) { falhas++; if (falhas > 5) break; await new Promise(res => setTimeout(res, 3000)); continue }
+        
+        const j = await r.json()
+        falhas = 0 // Reseta falhas se deu certo
+
+        // Se ainda restam e-mails, o loop continua mesmo que o lote tenha enviado 0 (por causa de e-mails inválidos)
+        if (j.done || j.restantes === 0) {
+          continuar = false
+        } else {
+          await new Promise(res => setTimeout(res, 1500))
+        }
+      } catch (err) {
+        falhas++
+        if (falhas > 5) break
+        await new Promise(res => setTimeout(res, 3000))
       }
-      buscarCampanhas(true); carregarStats()
-    } catch (err: any) {
-      alert(`⚠️ Erro no envio: ${err.message}`)
     }
+
     setProcessandoId(null)
+    buscarCampanhas(true); carregarStats()
+    alert(`✅ Envio finalizado ou pausado por segurança.`)
   }
 
   const toggleSelecionada = (id: string) => { const novo = new Set(selecionadas); novo.has(id) ? novo.delete(id) : novo.add(id); setSelecionadas(novo) }
@@ -212,7 +224,13 @@ export default function AutomacoesPage() {
       if (!r.ok) { alert(`Erro ao enfileirar.`); setEnviando(false); return }
       setEnviando(false); setAssunto(''); setMensagem(''); setListaSelecionada(''); setScheduledAt('')
       buscarCampanhas(); 
-      if (!scheduledAt) dispararCampanha(novaCampanha.id, false) 
+      
+      // Dispara o Inngest de forma invisível
+      if (!scheduledAt) {
+        try {
+          await fetch('/api/disparo/iniciar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) })
+        } catch(e) { console.log("Inngest falhou, use o botão disparar manual.") }
+      }
     } catch (err) { alert("Erro de conexão."); setEnviando(false) }
   }
 
@@ -274,11 +292,6 @@ export default function AutomacoesPage() {
               const estaDisparando = processandoId === String(c.id)
               const corStatus = c.status === 'Pausada' ? 'bg-slate-200 text-slate-700' : c.status === 'Agendada' ? 'bg-purple-100 text-purple-700' : c.status === 'Enviando...' ? 'bg-cyan-100 text-cyan-700' : c.status === 'Enviada' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               
-              // Lógica de exibição de botões:
-              const isEnviada = c.status === 'Enviada';
-              const isPausada = c.status === 'Pausada';
-              const isEnviando = c.status === 'Enviando...' || c.status === 'Em Fila';
-
               return (
                 <div key={c.id} className={`p-4 rounded-xl border transition-colors ${sel ? 'border-blue-400 bg-blue-50' : 'border-slate-100 bg-slate-50'}`}>
                   <div className="flex gap-3 items-start">
@@ -299,22 +312,17 @@ export default function AutomacoesPage() {
                         <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"><BarChart3 className="size-3" /> Desempenho</button>
                         <button onClick={() => reutilizarCampanha(c)} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"><Copy className="size-3" /> Reutilizar</button>
                         
-                        {/* ✅ BOTÕES DE DISPARO - APARECEM SE NÃO ESTIVER ENVIADA */}
-                        {!isEnviada && (
-                          <>
-                            <button onClick={() => dispararCampanha(c.id, false)} disabled={estaDisparando} className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
-                              {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Rocket className="size-3"/>} Inngest
-                            </button>
-                            <button onClick={() => dispararCampanha(c.id, true)} disabled={estaDisparando} className="text-xs font-bold text-orange-700 hover:text-orange-800 flex items-center gap-1 disabled:opacity-50">
-                              {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Manual
-                            </button>
-                          </>
+                        {/* ✅ BOTÃO DISPARAR ÚNICO (Sempre que houver pendentes) */}
+                        {st.pendentes > 0 && (
+                          <button onClick={() => dispararCampanha(c.id)} disabled={estaDisparando} className="text-xs font-bold text-blue-700 hover:text-blue-800 flex items-center gap-1 disabled:opacity-50">
+                            {estaDisparando ? <Loader2 className="size-3 animate-spin"/> : <Zap className="size-3"/>} Disparar
+                          </button>
                         )}
                         
-                        {/* ✅ BOTÃO PAUSAR - APARECE SÓ SE ESTIVER ENVIANDO OU PAUSADA */}
-                        {(isEnviando || isPausada) && (
+                        {/* ✅ BOTÃO PAUSAR SÓ SE HOUVER PENDENTES */}
+                        {st.pendentes > 0 && (
                           <button onClick={() => alternarPausa(c)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1">
-                            {isPausada ? <Play className="size-3" /> : <Pause className="size-3" />} {isPausada ? 'Retomar' : 'Pausar'}
+                            {c.status === 'Pausada' ? <Play className="size-3" /> : <Pause className="size-3" />} {c.status === 'Pausada' ? 'Retomar' : 'Pausar'}
                           </button>
                         )}
                       </div>
