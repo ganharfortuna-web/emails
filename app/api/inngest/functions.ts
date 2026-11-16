@@ -40,6 +40,7 @@ export const processarFilaEmails = inngest.createFunction(
       return data;
     });
 
+    // ✅ OTIMIZAÇÃO: Aumentamos o lote para 50 e-mails
     const lote = await step.run("buscar-lote", async () => {
       const { data } = await supabase
         .from('email_queue')
@@ -47,7 +48,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(30);
+        .limit(50); 
       return data || [];
     });
 
@@ -65,25 +66,31 @@ export const processarFilaEmails = inngest.createFunction(
       auth: { user: conta.email, pass: conta.app_password }, tls: { rejectUnauthorized: false },
     });
 
-    for (const item of lote) {
-      await step.run(`enviar-${item.id}`, async () => {
+    // ✅ OTIMIZAÇÃO EXTREMA: Todo o loop de 50 e-mails agora roda em 1 única execução!
+    await step.run("processar-lote-emails", async () => {
+      for (const item of lote) {
         try {
           let corpo = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente');
           corpo = prepararHtmlEmail(corpo);
           if (baseUrl) {
             corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`) + `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`;
           }
+          
           await transporter.sendMail({
             from: { name: conta.sender_name || 'Equipe', address: conta.sender_email || conta.email },
             to: item.recipient_email, subject: item.subject, html: corpo,
           });
+          
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
+          
+          // Pequeno delay para não sobrecarregar o SMTP e evitar que o Vercel dê Timeout
+          await new Promise(resolve => setTimeout(resolve, 100)); 
         } catch (err: any) {
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
         }
-      });
-    }
+      }
+    });
 
     const restantes = await step.run("checar-restantes", async () => {
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', campanhaId).eq('status', 'pending');
