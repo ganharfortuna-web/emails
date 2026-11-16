@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, ChevronLeft, ChevronRight, Settings, Server, Activity, Check, TrendingUp } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, ChevronLeft, ChevronRight, Settings, Server, Activity, Check, TrendingUp, Save } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -55,6 +55,10 @@ export default function AutomacoesPage() {
   const [qstashCounter, setQstashCounter] = useState(0)
   const [inputQstash, setInputQstash] = useState('')
   
+  // ✅ CREDENCIAIS UPSTASH
+  const [upstashId, setUpstashId] = useState('')
+  const [upstashEmail, setUpstashEmail] = useState('')
+  const [upstashApiKey, setUpstashApiKey] = useState('')
   const [salvandoManual, setSalvandoManual] = useState(false)
 
   const [pageCampanhas, setPageCampanhas] = useState(0)
@@ -99,11 +103,10 @@ export default function AutomacoesPage() {
   }
 
   const buscarConfiguracoes = async () => {
-    const { data } = await supabase.from('system_settings').select('active_provider, inngest_counter, qstash_counter').eq('id', 1).single()
+    const { data } = await supabase.from('system_settings').select('active_provider, inngest_counter, qstash_counter, upstash_id, upstash_email, upstash_api_key').eq('id', 1).single()
     if (data) {
       setProviderAtivo(data.active_provider)
       
-      // Formata o valor salvo no banco com ponto para ficar bonito no input
       const formatadoInngest = data.inngest_counter ? data.inngest_counter.toLocaleString('pt-BR') : ''
       const formatadoQstash = data.qstash_counter ? data.qstash_counter.toLocaleString('pt-BR') : ''
       
@@ -112,68 +115,63 @@ export default function AutomacoesPage() {
       
       setQstashCounter(data.qstash_counter || 0)
       setInputQstash(formatadoQstash)
+
+      setUpstashId(data.upstash_id || '')
+      setUpstashEmail(data.upstash_email || '')
+      setUpstashApiKey(data.upstash_api_key || '')
     }
   }
 
   const mudarProvider = async (novoProvider: string) => {
-    const { data, error } = await supabase
-      .from('system_settings')
-      .upsert({ id: 1, active_provider: novoProvider, updated_at: new Date().toISOString() })
-      .select()
-
-    if (error) {
-      alert("Erro ao salvar no banco: " + error.message)
-    } else {
+    const { error } = await supabase.from('system_settings').upsert({ id: 1, active_provider: novoProvider, updated_at: new Date().toISOString() }).select()
+    if (!error) {
       setProviderAtivo(novoProvider)
       alert(`✅ Provedor alterado para ${novoProvider.toUpperCase()} com sucesso!`)
-    }
+    } else { alert("Erro: " + error.message) }
   }
 
   const salvarContador = async (tipo: 'inngest' | 'qstash') => {
     const isInngest = tipo === 'inngest';
     const inputTexto = isInngest ? inputInngest : inputQstash;
-    
-    // ✅ CORREÇÃO DEFINITIVA DO PONTO: Remove tudo que não for número antes de salvar
     const textoLimpo = inputTexto.replace(/\D/g, '')
     const valor = parseInt(textoLimpo, 10) || 0;
     
     setSalvandoManual(true)
     const campo = isInngest ? 'inngest_counter' : 'qstash_counter';
-    
-    const { error } = await supabase
-      .from('system_settings')
-      .update({ [campo]: valor })
-      .eq('id', 1)
+    const { error } = await supabase.from('system_settings').update({ [campo]: valor }).eq('id', 1)
 
     if (!error) {
-      // Atualiza a tela formatando o número de volta com pontos
       if (isInngest) { setInngestCounter(valor); setInputInngest(valor.toLocaleString('pt-BR')) }
       else { setQstashCounter(valor); setInputQstash(valor.toLocaleString('pt-BR')) }
       alert("✅ Contador atualizado!")
-    } else {
-      alert("Erro ao salvar: " + error.message)
-    }
+    } else { alert("Erro: " + error.message) }
+    setSalvandoManual(false)
+  }
+
+  const salvarCredenciaisUpstash = async () => {
+    setSalvandoManual(true)
+    const { error } = await supabase.from('system_settings').update({ 
+      upstash_id: upstashId, 
+      upstash_email: upstashEmail, 
+      upstash_api_key: upstashApiKey 
+    }).eq('id', 1)
+
+    if (!error) alert("✅ Credenciais da Upstash salvas!")
+    else alert("Erro: " + error.message)
     setSalvandoManual(false)
   }
 
   const zerarContador = async (tipo: 'inngest' | 'qstash') => {
     if(!confirm(`Tem certeza que deseja ZERAR o contador do ${tipo.toUpperCase()}?`)) return;
-    
     setSalvandoManual(true)
     const campo = tipo === 'inngest' ? 'inngest_counter' : 'qstash_counter';
-    
-    const { error } = await supabase
-      .from('system_settings')
-      .update({ [campo]: 0 })
-      .eq('id', 1)
+    const { error } = await supabase.from('system_settings').update({ [campo]: 0 }).eq('id', 1)
 
     if (!error) {
       if (tipo === 'inngest') { setInngestCounter(0); setInputInngest('') }
       else { setQstashCounter(0); setInputQstash('') }
-      alert("✅ Contador zerado com sucesso!")
-    } else {
-      alert("Erro ao zerar: " + error.message)
-    }
+      alert("✅ Contador zerado!")
+    } else { alert("Erro ao zerar: " + error.message) }
     setSalvandoManual(false)
   }
 
@@ -359,12 +357,8 @@ export default function AutomacoesPage() {
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
 
-  // ✅ CÁLCULO BASEADO PURAMENTE NO INPUT MANUAL
-  // Inngest gasta cerca de 1.1 execuções por e-mail enviado
   const execucoesRestantesInngest = Math.max(0, 50000 - inngestCounter);
   const emailsRestantesInngest = Math.floor(execucoesRestantesInngest / 1.1);
-
-  // QStash gasta exatamente 1 mensagem por lote de 30 e-mails
   const mensagensRestantesQstash = Math.max(0, 30000 - qstashCounter);
   const emailsRestantesQstash = mensagensRestantesQstash * 30;
 
@@ -375,9 +369,14 @@ export default function AutomacoesPage() {
           <h2 className="text-3xl font-black text-slate-900">Automações</h2>
           <p className="text-slate-600 mt-1">Crie e dispare campanhas.</p>
         </div>
-        <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
-          <button onClick={() => setAbaPainel('campanhas')} className={`px-4 py-2 rounded-lg font-bold text-sm ${abaPainel === 'campanhas' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}>Campanhas</button>
-          <button onClick={() => setAbaPainel('configuracoes')} className={`px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 ${abaPainel === 'configuracoes' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}><Settings className="size-4" /> Controle de Limites</button>
+        <div className="flex gap-4 items-center">
+          <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+            <button onClick={() => setAbaPainel('campanhas')} className={`px-4 py-2 rounded-lg font-bold text-sm ${abaPainel === 'campanhas' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}>Campanhas</button>
+            <button onClick={() => setAbaPainel('configuracoes')} className={`px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 ${abaPainel === 'configuracoes' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}><Settings className="size-4" /> Controle de Limites</button>
+          </div>
+          <button onClick={() => buscarCampanhas(true)} disabled={atualizando} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 font-bold py-2 px-4 rounded-lg shadow-sm">
+            <RefreshCw className={`size-4 ${atualizando ? 'animate-spin text-blue-600' : ''}`} /> Atualizar
+          </button>
         </div>
       </div>
 
@@ -385,7 +384,6 @@ export default function AutomacoesPage() {
         <div className="bg-white rounded-2xl border shadow-sm p-8 space-y-8 animate-in fade-in">
           <div>
             <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2"><Activity className="size-5 text-indigo-600" /> Contadores e Estimativas</h3>
-            <p className="text-sm text-slate-500 mb-6">Digite o valor exato que aparece no painel do seu provedor e salve. O sistema calcula quantos envios ainda restam.</p>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* CARD INNGEST */}
@@ -402,19 +400,9 @@ export default function AutomacoesPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={inputInngest} 
-                    onChange={e => setInputInngest(e.target.value)}
-                    className="flex-1 p-2 border rounded-lg text-sm" 
-                    placeholder="Ex: 31.000"
-                  />
-                  <button onClick={() => salvarContador('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
-                    <Check className="size-4" /> Salvar
-                  </button>
-                  <button onClick={() => zerarContador('inngest')} disabled={salvandoManual} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold">
-                    Zerar
-                  </button>
+                  <input type="text" value={inputInngest} onChange={e => setInputInngest(e.target.value)} className="flex-1 p-2 border rounded-lg text-sm" placeholder="Ex: 31.000" />
+                  <button onClick={() => salvarContador('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"><Check className="size-4" /> Salvar</button>
+                  <button onClick={() => zerarContador('inngest')} disabled={salvandoManual} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold">Zerar</button>
                 </div>
               </div>
 
@@ -431,20 +419,21 @@ export default function AutomacoesPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={inputQstash} 
-                    onChange={e => setInputQstash(e.target.value)}
-                    className="flex-1 p-2 border rounded-lg text-sm" 
-                    placeholder="Ex: 527"
-                  />
-                  <button onClick={() => salvarContador('qstash')} disabled={salvandoManual} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
-                    <Check className="size-4" /> Salvar
-                  </button>
-                  <button onClick={() => zerarContador('qstash')} disabled={salvandoManual} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold">
-                    Zerar
-                  </button>
+                <div className="flex gap-2 mb-4">
+                  <input type="text" value={inputQstash} onChange={e => setInputQstash(e.target.value)} className="flex-1 p-2 border rounded-lg text-sm" placeholder="Ex: 527" />
+                  <button onClick={() => salvarContador('qstash')} disabled={salvandoManual} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"><Check className="size-4" /> Salvar</button>
+                  <button onClick={() => zerarContador('qstash')} disabled={salvandoManual} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold">Zerar</button>
+                </div>
+
+                {/* ✅ FORMULÁRIO DE CREDENCIAIS UPSTASH */}
+                <div className="pt-4 border-t border-slate-200 space-y-3">
+                  <p className="text-xs font-bold text-slate-500">Credenciais da API Upstash (Para sincronização automática)</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    <input type="text" value={upstashId} onChange={e => setUpstashId(e.target.value)} className="w-full p-2 border rounded-lg text-xs" placeholder="QStash ID (usr_...)" />
+                    <input type="email" value={upstashEmail} onChange={e => setUpstashEmail(e.target.value)} className="w-full p-2 border rounded-lg text-xs" placeholder="E-mail da Upstash" />
+                    <input type="password" value={upstashApiKey} onChange={e => setUpstashApiKey(e.target.value)} className="w-full p-2 border rounded-lg text-xs" placeholder="API Key da Upstash" />
+                  </div>
+                  <button onClick={salvarCredenciaisUpstash} disabled={salvandoManual} className="w-full bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg text-xs font-bold flex justify-center items-center gap-1"><Save className="size-3" /> Salvar Credenciais Upstash</button>
                 </div>
               </div>
             </div>
