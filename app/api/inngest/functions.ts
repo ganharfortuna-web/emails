@@ -17,6 +17,16 @@ export const processarFilaEmails = inngest.createFunction(
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
+    // 🛑 TRAVA DE SEGURANÇA: Verifica se o Inngest é o provedor ativo
+    const statusProvedor = await step.run("checar-provedor", async () => {
+      const { data } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single();
+      return data?.active_provider;
+    });
+
+    if (statusProvedor !== 'inngest') {
+      return "Ignorado: QStash está ativo no momento.";
+    }
+
     const statusCampanha = await step.run("checar-status", async () => {
       const { data } = await supabase.from('campanhas').select('status').eq('id', campanhaId).single();
       return data?.status;
@@ -37,7 +47,7 @@ export const processarFilaEmails = inngest.createFunction(
         .eq('campaign_id', campanhaId)
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(30); // Lote de 30
+        .limit(30);
       return data || [];
     });
 
@@ -100,10 +110,20 @@ export const autoRecuperacao = inngest.createFunction(
   { 
     id: "auto-recuperacao",
     concurrency: 1,
-    triggers: [{ cron: "*/10 * * * *" }] // ✅ ECONOMIA: A cada 10 minutos
+    triggers: [{ cron: "*/10 * * * *" }]
   },
   async ({ step }) => {
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+
+    // 🛑 TRAVA DE SEGURANÇA
+    const statusProvedor = await step.run("checar-provedor-cron", async () => {
+      const { data } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single();
+      return data?.active_provider;
+    });
+
+    if (statusProvedor !== 'inngest') {
+      return "Ignorado: QStash está ativo no momento.";
+    }
 
     const agendadasVencidas = await step.run("buscar-agendadas", async () => {
       const { data } = await supabase.from('campanhas').select('id').eq('status', 'Agendada').lte('scheduled_at', new Date().toISOString()); 

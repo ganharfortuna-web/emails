@@ -17,6 +17,12 @@ export async function POST(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
+    // 🛑 TRAVA DE SEGURANÇA
+    const { data: settings } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single()
+    if (settings?.active_provider !== 'inngest') {
+      return NextResponse.json({ error: 'Ignorado: QStash está ativo.' }, { status: 400 })
+    }
+
     const { campanhaId } = await request.json().catch(() => ({}))
 
     if (campanhaId) {
@@ -64,16 +70,10 @@ export async function POST(request: Request) {
     let enviados = 0
     const campaignIds = new Set<string | number>()
 
-    // ✅ AQUI TAMBÉM: pool: true
     const transporter = nodemailer.createTransport({
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 100,
-      host: contaUnica.host || 'smtp.gmail.com',
-      port: contaUnica.port || 587,
-      secure: contaUnica.port === 465,
-      auth: { user: contaUnica.email, pass: contaUnica.app_password },
-      tls: { rejectUnauthorized: false },
+      pool: true, maxConnections: 5, maxMessages: 100,
+      host: contaUnica.host || 'smtp.gmail.com', port: contaUnica.port || 587, secure: contaUnica.port === 465,
+      auth: { user: contaUnica.email, pass: contaUnica.app_password }, tls: { rejectUnauthorized: false },
       connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
     })
 

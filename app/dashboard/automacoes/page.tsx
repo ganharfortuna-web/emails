@@ -243,6 +243,12 @@ export default function AutomacoesPage() {
         setProcessandoId(null); buscarCampanhas(true); carregarStats(); return 
       }
     } catch (err) { console.log("Falhou") }
+
+    // 🛑 TRAVA DE SEGURANÇA: Se falhou e for QStash, n00e3o usa fallback do Inngest
+    if (providerAtivo === "qstash") {
+      alert("Erro ao acionar QStash. O watchdog tentar00e1 novamente.");
+      setProcessandoId(null); return;
+    }
     
     let continuar = true, falhas = 0
     while (continuar) {

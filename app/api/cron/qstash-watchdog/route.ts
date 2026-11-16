@@ -21,30 +21,22 @@ export async function POST(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
-    const { count } = await supabase
-      .from('email_queue')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending')
-
-    if (!count || count === 0) {
-      return NextResponse.json({ message: 'Fila vazia, nada a fazer.' })
+    // 🛑 TRAVA DE SEGURANÇA
+    const { data: settings } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single()
+    if (settings?.active_provider !== 'qstash') {
+      return NextResponse.json({ message: 'QStash inativo. Não disparando webhook.' })
     }
 
-    // ✅ ALTERADO AQUI: Dispara apenas 1 mensagem para economizar cota do QStash
+    const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('status', 'pending')
+    if (!count || count === 0) return NextResponse.json({ message: 'Fila vazia.' })
+
     await fetch(qstashUrl, {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${qstashToken}`, 
-        'Content-Type': 'application/json' 
-      },
+      headers: { 'Authorization': `Bearer ${qstashToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({}) 
     })
 
-    return NextResponse.json({ 
-      success: true, 
-      message: `Havia ${count} pendentes. 1 lote enviado para o QStash.` 
-    })
-
+    return NextResponse.json({ success: true, message: `Havia ${count} pendentes. 1 lote enviado para o QStash.` })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
