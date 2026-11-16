@@ -23,15 +23,27 @@ export async function POST(request: Request) {
     const { data: conta } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single()
     if (!conta) return NextResponse.json({ error: 'Sem conta SMTP' }, { status: 400 })
 
-    const { data: lote } = await supabase
+    // ✅ CORREÇÃO AQUI: Busca os IDs das campanhas que estão pausadas
+    const { data: pausadas } = await supabase.from('campanhas').select('id').eq('status', 'Pausada')
+    const idsPausados = (pausadas || []).map((c: any) => c.id)
+
+    // Monta a query da fila ignorando as campanhas pausadas
+    let query = supabase
       .from('email_queue')
       .select('*')
       .eq('status', 'pending')
+    
+    if (idsPausados.length > 0) {
+      query = query.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
+    }
+
+    const { data: lote } = await query
       .order('created_at', { ascending: true })
       .limit(BATCH_SIZE)
 
+    // Se todos os e-mails da fila forem de campanhas pausadas, ele não faz nada
     if (!lote || lote.length === 0) {
-      return NextResponse.json({ message: 'Fila vazia' })
+      return NextResponse.json({ message: 'Fila vazia ou campanhas pausadas' })
     }
 
     const transporter = nodemailer.createTransport({
@@ -69,7 +81,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // ✅ A MÁGICA ACONTECE AQUI: Soma +1 no contador do QStash no banco de dados
     if (enviados > 0) {
       await supabase.rpc('increment_qstash_counter')
     }
