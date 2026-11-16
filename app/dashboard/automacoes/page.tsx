@@ -91,7 +91,10 @@ export default function AutomacoesPage() {
   }
 
   const buscarConfiguracoes = async () => {
-    const { data } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single()
+    const { data, error } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single()
+    if (error && error.code !== 'PGRST116') {
+      console.error("Erro ao buscar config:", error)
+    }
     if (data) setProviderAtivo(data.active_provider)
   }
 
@@ -101,12 +104,22 @@ export default function AutomacoesPage() {
     setEnviadosMes(count || 0)
   }
 
+  // ✅ CORREÇÃO AQUI: Usando UPSERT para garantir a gravação e SELECT para verificar
   const mudarProvider = async (novoProvider: string) => {
-    const { error } = await supabase.from('system_settings').update({ active_provider: novoProvider }).eq('id', 1)
-    if (!error) {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .upsert({ id: 1, active_provider: novoProvider, updated_at: new Date().toISOString() })
+      .select()
+
+    if (error) {
+      alert("Erro ao salvar no banco: " + error.message)
+      console.error(error)
+    } else if (!data || data.length === 0) {
+      alert("Erro: O banco de dados bloqueou a alteração. Verifique as permissões da tabela system_settings no Supabase (RLS).")
+    } else {
       setProviderAtivo(novoProvider)
       alert(`✅ Provedor alterado para ${novoProvider.toUpperCase()} com sucesso!`)
-    } else { alert("Erro: " + error.message) }
+    }
   }
 
   const buscarCampanhas = async (silencioso = false) => {
