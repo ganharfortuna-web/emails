@@ -4,13 +4,11 @@ import nodemailer from 'nodemailer'
 import { prepararHtmlEmail } from '@/lib/email-html'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60; // 60 segundos para a Vercel não cortar no meio
+export const maxDuration = 60;
 
-const BATCH_SIZE = 30; // Processa 30 e-mails por mensagem
+const BATCH_SIZE = 30; 
 
 export async function POST(request: Request) {
-  // ✅ REMOVIDA A TRAVA DE AUTORIZAÇÃO BUGADA
-  
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
@@ -22,11 +20,9 @@ export async function POST(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
-    // 1. Busca a conta SMTP
     const { data: conta } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single()
     if (!conta) return NextResponse.json({ error: 'Sem conta SMTP' }, { status: 400 })
 
-    // 2. Busca o lote de e-mails pendentes
     const { data: lote } = await supabase
       .from('email_queue')
       .select('*')
@@ -38,7 +34,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: 'Fila vazia' })
     }
 
-    // 3. Configura o envio
     const transporter = nodemailer.createTransport({
       pool: true, 
       host: conta.host, 
@@ -50,7 +45,6 @@ export async function POST(request: Request) {
 
     let enviados = 0;
 
-    // 4. Envia os e-mails
     for (const item of lote) {
       try {
         let corpo = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
@@ -69,12 +63,15 @@ export async function POST(request: Request) {
         await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id)
         enviados++;
         
-        // Pausa de 1 segundo entre e-mails
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (err: any) {
-        // Se der erro, marca como falha e continua para o próximo
         await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id)
       }
+    }
+
+    // ✅ A MÁGICA ACONTECE AQUI: Soma +1 no contador do QStash no banco de dados
+    if (enviados > 0) {
+      await supabase.rpc('increment_qstash_counter')
     }
 
     return NextResponse.json({ success: true, enviados })
