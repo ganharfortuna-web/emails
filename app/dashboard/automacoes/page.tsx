@@ -49,9 +49,13 @@ export default function AutomacoesPage() {
   const [providerAtivo, setProviderAtivo] = useState('inngest')
   const [enviadosMes, setEnviadosMes] = useState(0)
   
-  // ✅ ESTADOS PARA O AJUSTE MANUAL
+  // ✅ ESTADOS PARA O AJUSTE MANUAL (Inngest e QStash)
   const [manualUsage, setManualUsage] = useState(0)
   const [inputManualUsage, setInputManualUsage] = useState('')
+  
+  const [manualQstashUsage, setManualQstashUsage] = useState(0)
+  const [inputManualQstashUsage, setInputManualQstashUsage] = useState('')
+  
   const [salvandoManual, setSalvandoManual] = useState(false)
 
   const [pageCampanhas, setPageCampanhas] = useState(0)
@@ -96,11 +100,14 @@ export default function AutomacoesPage() {
   }
 
   const buscarConfiguracoes = async () => {
-    const { data } = await supabase.from('system_settings').select('active_provider, manual_inngest_usage').eq('id', 1).single()
+    const { data } = await supabase.from('system_settings').select('active_provider, manual_inngest_usage, manual_qstash_usage').eq('id', 1).single()
     if (data) {
       setProviderAtivo(data.active_provider)
       setManualUsage(data.manual_inngest_usage || 0)
       setInputManualUsage(data.manual_inngest_usage ? String(data.manual_inngest_usage) : '0')
+      
+      setManualQstashUsage(data.manual_qstash_usage || 0)
+      setInputManualQstashUsage(data.manual_qstash_usage ? String(data.manual_qstash_usage) : '0')
     }
   }
 
@@ -124,23 +131,26 @@ export default function AutomacoesPage() {
     }
   }
 
-  // ✅ FUNÇÃO PARA SALVAR O AJUSTE MANUAL
-  const salvarManualUsage = async () => {
-    const valor = parseInt(inputManualUsage, 10) || 0;
+  const salvarManualUsage = async (tipo: 'inngest' | 'qstash') => {
+    const isInngest = tipo === 'inngest';
+    const valor = parseInt(isInngest ? inputManualUsage : inputManualQstashUsage, 10) || 0;
+    
     setSalvandoManual(true)
+    const campo = isInngest ? 'manual_inngest_usage' : 'manual_qstash_usage';
+    
     const { error } = await supabase
       .from('system_settings')
-      .update({ manual_inngest_usage: valor })
+      .update({ [campo]: valor })
       .eq('id', 1)
 
     if (!error) {
-      setManualUsage(valor)
-      setSalvandoManual(false)
-      alert("✅ Limite ajustado com sucesso!")
+      if (isInngest) setManualUsage(valor);
+      else setManualQstashUsage(valor);
+      alert("✅ Ajuste manual salvo com sucesso!")
     } else {
       alert("Erro ao salvar: " + error.message)
-      setSalvandoManual(false)
     }
+    setSalvandoManual(false)
   }
 
   const buscarCampanhas = async (silencioso = false) => {
@@ -325,8 +335,9 @@ export default function AutomacoesPage() {
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
   
-  // ✅ CÁLCULO DO LIMITE REAL
+  // ✅ CÁLCULOS DOS LIMITES REAIS (Automático + Manual)
   const gastoEstimadoInngest = Math.ceil(enviadosMes * 1.1) + manualUsage;
+  const gastoEstimadoQstash = Math.ceil(enviadosMes / 30) + manualQstashUsage;
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -353,21 +364,23 @@ export default function AutomacoesPage() {
               <div className="bg-slate-50 border rounded-xl p-6 flex flex-col justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-500 mb-1">
-                    {providerAtivo === 'inngest' ? 'Gasto Real Inngest' : 'Mensagens QStash (Lotes de 30)'}
+                    {providerAtivo === 'inngest' ? 'Gasto Real Inngest (Automático + Manual)' : 'Mensagens QStash (Automático + Manual)'}
                   </p>
                   {providerAtivo === 'inngest' ? (
                     <div className="flex items-end gap-2">
                       <p className="text-4xl font-black text-slate-900">{gastoEstimadoInngest.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 50.000</span></p>
                     </div>
                   ) : (
-                    <p className="text-4xl font-black text-slate-900">~{Math.ceil(enviadosMes / 30)} <span className="text-lg text-slate-400">/ 30.000</span></p>
+                    <p className="text-4xl font-black text-slate-900">{gastoEstimadoQstash.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 30.000</span></p>
                   )}
                 </div>
                 
-                {/* ✅ CAMPO DE AJUSTE MANUAL DO INNGEST */}
-                {providerAtivo === 'inngest' && (
-                  <div className="mt-4 pt-4 border-t border-slate-200">
-                    <label className="text-xs font-bold text-slate-500 block mb-1">Ajuste Manual (Copie do Painel Inngest)</label>
+                {/* CAMPO DE AJUSTE MANUAL DINÂMICO */}
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  <label className="text-xs font-bold text-slate-500 block mb-1">
+                    Ajuste Manual ({providerAtivo === 'inngest' ? 'Copie do Painel Inngest' : 'Copie do Painel QStash'})
+                  </label>
+                  {providerAtivo === 'inngest' ? (
                     <div className="flex gap-2">
                       <input 
                         type="number" 
@@ -376,12 +389,25 @@ export default function AutomacoesPage() {
                         className="flex-1 p-2 border rounded-lg text-sm" 
                         placeholder="Ex: 15000"
                       />
-                      <button onClick={salvarManualUsage} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
+                      <button onClick={() => salvarManualUsage('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
                         {salvandoManual ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Salvar
                       </button>
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="flex gap-2">
+                      <input 
+                        type="number" 
+                        value={inputManualQstashUsage} 
+                        onChange={e => setInputManualQstashUsage(e.target.value)}
+                        className="flex-1 p-2 border rounded-lg text-sm" 
+                        placeholder="Ex: 5000"
+                      />
+                      <button onClick={() => salvarManualUsage('qstash')} disabled={salvandoManual} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
+                        {salvandoManual ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Salvar
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
