@@ -104,10 +104,10 @@ export default function AutomacoesPage() {
     if (data) {
       setProviderAtivo(data.active_provider)
       setManualUsage(data.manual_inngest_usage || 0)
-      setInputManualUsage(data.manual_inngest_usage ? String(data.manual_inngest_usage) : '0')
+      setInputManualUsage(data.manual_inngest_usage ? String(data.manual_inngest_usage) : '')
       
       setManualQstashUsage(data.manual_qstash_usage || 0)
-      setInputManualQstashUsage(data.manual_qstash_usage ? String(data.manual_qstash_usage) : '0')
+      setInputManualQstashUsage(data.manual_qstash_usage ? String(data.manual_qstash_usage) : '')
     }
   }
 
@@ -133,6 +133,7 @@ export default function AutomacoesPage() {
 
   const salvarManualUsage = async (tipo: 'inngest' | 'qstash') => {
     const isInngest = tipo === 'inngest';
+    // Se o campo estiver vazio, assume 0 (que volta a usar o cálculo automático)
     const valor = parseInt(isInngest ? inputManualUsage : inputManualQstashUsage, 10) || 0;
     
     setSalvandoManual(true)
@@ -335,9 +336,9 @@ export default function AutomacoesPage() {
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
   
-  // ✅ CÁLCULOS DOS LIMITES REAIS (Automático + Manual)
-  const gastoEstimadoInngest = Math.ceil(enviadosMes * 1.1) + manualUsage;
-  const gastoEstimadoQstash = Math.ceil(enviadosMes / 30) + manualQstashUsage;
+  // ✅ AQUI ESTÁ A CORREÇÃO: O cálculo manual SOBRESCREVE o automático se for maior que 0
+  const gastoExibidoInngest = manualUsage > 0 ? manualUsage : Math.ceil(enviadosMes * 1.1);
+  const gastoExibidoQstash = manualQstashUsage > 0 ? manualQstashUsage : Math.ceil(enviadosMes / 30);
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -364,21 +365,21 @@ export default function AutomacoesPage() {
               <div className="bg-slate-50 border rounded-xl p-6 flex flex-col justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-500 mb-1">
-                    {providerAtivo === 'inngest' ? 'Gasto Real Inngest (Automático + Manual)' : 'Mensagens QStash (Automático + Manual)'}
+                    {providerAtivo === 'inngest' ? 'Gasto Real Inngest' : 'Mensagens QStash'}
                   </p>
                   {providerAtivo === 'inngest' ? (
                     <div className="flex items-end gap-2">
-                      <p className="text-4xl font-black text-slate-900">{gastoEstimadoInngest.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 50.000</span></p>
+                      <p className="text-4xl font-black text-slate-900">{gastoExibidoInngest.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 50.000</span></p>
                     </div>
                   ) : (
-                    <p className="text-4xl font-black text-slate-900">{gastoEstimadoQstash.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 30.000</span></p>
+                    <p className="text-4xl font-black text-slate-900">{gastoExibidoQstash.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 30.000</span></p>
                   )}
                 </div>
                 
-                {/* CAMPO DE AJUSTE MANUAL DINÂMICO */}
+                {/* CAMPO DE AJUSTE MANUAL (SOBRESCREVE O VALOR) */}
                 <div className="mt-4 pt-4 border-t border-slate-200">
                   <label className="text-xs font-bold text-slate-500 block mb-1">
-                    Ajuste Manual ({providerAtivo === 'inngest' ? 'Copie do Painel Inngest' : 'Copie do Painel QStash'})
+                    Ajuste Manual ({providerAtivo === 'inngest' ? 'Substitui o cálculo' : 'Substitui o cálculo'})
                   </label>
                   {providerAtivo === 'inngest' ? (
                     <div className="flex gap-2">
@@ -387,7 +388,7 @@ export default function AutomacoesPage() {
                         value={inputManualUsage} 
                         onChange={e => setInputManualUsage(e.target.value)}
                         className="flex-1 p-2 border rounded-lg text-sm" 
-                        placeholder="Ex: 15000"
+                        placeholder="Ex: 31000"
                       />
                       <button onClick={() => salvarManualUsage('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
                         {salvandoManual ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Salvar
@@ -417,7 +418,7 @@ export default function AutomacoesPage() {
             <div className="flex flex-col md:flex-row gap-4">
               <button onClick={() => mudarProvider('inngest')} className={`flex-1 p-6 rounded-xl border-2 text-left transition-all ${providerAtivo === 'inngest' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`}>
                 <h4 className="font-bold text-lg text-slate-900">Inngest (Principal)</h4>
-                <p className="text-sm text-slate-600 mt-1">Limite: 50.000 execuções/mês. (Cão de Guarda econômico).</p>
+                <p className="text-sm text-slate-600 mt-1">Limite: 50.000 execuções/mês.</p>
                 {providerAtivo === 'inngest' && <span className="inline-block mt-3 text-xs font-bold text-blue-700 bg-blue-200 px-3 py-1 rounded-full">Em Uso</span>}
               </button>
               
