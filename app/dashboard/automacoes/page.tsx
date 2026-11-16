@@ -47,14 +47,13 @@ export default function AutomacoesPage() {
   
   const [abaPainel, setAbaPainel] = useState<'campanhas' | 'configuracoes'>('campanhas')
   const [providerAtivo, setProviderAtivo] = useState('inngest')
-  const [enviadosMes, setEnviadosMes] = useState(0)
   
-  // ✅ ESTADOS PARA O AJUSTE MANUAL (Inngest e QStash)
-  const [manualUsage, setManualUsage] = useState(0)
-  const [inputManualUsage, setInputManualUsage] = useState('')
+  // ✅ CONTADORES SIMPLIFICADOS
+  const [inngestCounter, setInngestCounter] = useState(0)
+  const [inputInngest, setInputInngest] = useState('')
   
-  const [manualQstashUsage, setManualQstashUsage] = useState(0)
-  const [inputManualQstashUsage, setInputManualQstashUsage] = useState('')
+  const [qstashCounter, setQstashCounter] = useState(0)
+  const [inputQstash, setInputQstash] = useState('')
   
   const [salvandoManual, setSalvandoManual] = useState(false)
 
@@ -84,7 +83,7 @@ export default function AutomacoesPage() {
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
   useEffect(() => { 
-    buscarListas(); buscarConfiguracoes(); buscarEstatisticasMes();
+    buscarListas(); buscarConfiguracoes();
   }, [])
   
   useEffect(() => { buscarCampanhas() }, [pageCampanhas])
@@ -100,21 +99,15 @@ export default function AutomacoesPage() {
   }
 
   const buscarConfiguracoes = async () => {
-    const { data } = await supabase.from('system_settings').select('active_provider, manual_inngest_usage, manual_qstash_usage').eq('id', 1).single()
+    const { data } = await supabase.from('system_settings').select('active_provider, inngest_counter, qstash_counter').eq('id', 1).single()
     if (data) {
       setProviderAtivo(data.active_provider)
-      setManualUsage(data.manual_inngest_usage || 0)
-      setInputManualUsage(data.manual_inngest_usage ? String(data.manual_inngest_usage) : '')
+      setInngestCounter(data.inngest_counter || 0)
+      setInputInngest(data.inngest_counter ? String(data.inngest_counter) : '')
       
-      setManualQstashUsage(data.manual_qstash_usage || 0)
-      setInputManualQstashUsage(data.manual_qstash_usage ? String(data.manual_qstash_usage) : '')
+      setQstashCounter(data.qstash_counter || 0)
+      setInputQstash(data.qstash_counter ? String(data.qstash_counter) : '')
     }
-  }
-
-  const buscarEstatisticasMes = async () => {
-    const dataInicio = new Date(); dataInicio.setDate(1); dataInicio.setHours(0, 0, 0, 0);
-    const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('status', 'sent').gte('sent_at', dataInicio.toISOString());
-    setEnviadosMes(count || 0)
   }
 
   const mudarProvider = async (novoProvider: string) => {
@@ -131,13 +124,12 @@ export default function AutomacoesPage() {
     }
   }
 
-  const salvarManualUsage = async (tipo: 'inngest' | 'qstash') => {
+  const salvarContador = async (tipo: 'inngest' | 'qstash') => {
     const isInngest = tipo === 'inngest';
-    // Se o campo estiver vazio, assume 0 (que volta a usar o cálculo automático)
-    const valor = parseInt(isInngest ? inputManualUsage : inputManualQstashUsage, 10) || 0;
+    const valor = parseInt(isInngest ? inputInngest : inputQstash, 10) || 0;
     
     setSalvandoManual(true)
-    const campo = isInngest ? 'manual_inngest_usage' : 'manual_qstash_usage';
+    const campo = isInngest ? 'inngest_counter' : 'qstash_counter';
     
     const { error } = await supabase
       .from('system_settings')
@@ -145,11 +137,32 @@ export default function AutomacoesPage() {
       .eq('id', 1)
 
     if (!error) {
-      if (isInngest) setManualUsage(valor);
-      else setManualQstashUsage(valor);
-      alert("✅ Ajuste manual salvo com sucesso!")
+      if (isInngest) setInngestCounter(valor);
+      else setQstashCounter(valor);
+      alert("✅ Contador atualizado!")
     } else {
       alert("Erro ao salvar: " + error.message)
+    }
+    setSalvandoManual(false)
+  }
+
+  const zerarContador = async (tipo: 'inngest' | 'qstash') => {
+    if(!confirm(`Tem certeza que deseja ZERAR o contador do ${tipo.toUpperCase()}?`)) return;
+    
+    setSalvandoManual(true)
+    const campo = tipo === 'inngest' ? 'inngest_counter' : 'qstash_counter';
+    
+    const { error } = await supabase
+      .from('system_settings')
+      .update({ [campo]: 0 })
+      .eq('id', 1)
+
+    if (!error) {
+      if (tipo === 'inngest') { setInngestCounter(0); setInputInngest('') }
+      else { setQstashCounter(0); setInputQstash('') }
+      alert("✅ Contador zerado com sucesso!")
+    } else {
+      alert("Erro ao zerar: " + error.message)
     }
     setSalvandoManual(false)
   }
@@ -335,10 +348,6 @@ export default function AutomacoesPage() {
 
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
-  
-  // ✅ AQUI ESTÁ A CORREÇÃO: O cálculo manual SOBRESCREVE o automático se for maior que 0
-  const gastoExibidoInngest = manualUsage > 0 ? manualUsage : Math.ceil(enviadosMes * 1.1);
-  const gastoExibidoQstash = manualQstashUsage > 0 ? manualQstashUsage : Math.ceil(enviadosMes / 30);
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -356,75 +365,70 @@ export default function AutomacoesPage() {
       {abaPainel === 'configuracoes' ? (
         <div className="bg-white rounded-2xl border shadow-sm p-8 space-y-8 animate-in fade-in">
           <div>
-            <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2"><Activity className="size-5 text-indigo-600" /> Estatísticas do Mês</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2"><Activity className="size-5 text-indigo-600" /> Contadores Manuais</h3>
+            <p className="text-sm text-slate-500 mb-6">Digite o valor exato que aparece no painel do seu provedor e salve. O contador fica salvo até você decidir zerar.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* CARD INNGEST */}
               <div className="bg-slate-50 border rounded-xl p-6">
-                <p className="text-sm font-bold text-slate-500 mb-1">E-mails Enviados este Mês</p>
-                <p className="text-4xl font-black text-slate-900">{enviadosMes.toLocaleString('pt-BR')}</p>
-              </div>
-              <div className="bg-slate-50 border rounded-xl p-6 flex flex-col justify-between">
-                <div>
-                  <p className="text-sm font-bold text-slate-500 mb-1">
-                    {providerAtivo === 'inngest' ? 'Gasto Real Inngest' : 'Mensagens QStash'}
-                  </p>
-                  {providerAtivo === 'inngest' ? (
-                    <div className="flex items-end gap-2">
-                      <p className="text-4xl font-black text-slate-900">{gastoExibidoInngest.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 50.000</span></p>
-                    </div>
-                  ) : (
-                    <p className="text-4xl font-black text-slate-900">{gastoExibidoQstash.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 30.000</span></p>
-                  )}
+                <p className="text-sm font-bold text-slate-500 mb-1">Uso do Inngest (Limite: 50.000)</p>
+                <div className="flex items-end gap-2 mb-4">
+                  <p className="text-4xl font-black text-slate-900">{inngestCounter.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 50.000</span></p>
                 </div>
-                
-                {/* CAMPO DE AJUSTE MANUAL (SOBRESCREVE O VALOR) */}
-                <div className="mt-4 pt-4 border-t border-slate-200">
-                  <label className="text-xs font-bold text-slate-500 block mb-1">
-                    Ajuste Manual ({providerAtivo === 'inngest' ? 'Substitui o cálculo' : 'Substitui o cálculo'})
-                  </label>
-                  {providerAtivo === 'inngest' ? (
-                    <div className="flex gap-2">
-                      <input 
-                        type="number" 
-                        value={inputManualUsage} 
-                        onChange={e => setInputManualUsage(e.target.value)}
-                        className="flex-1 p-2 border rounded-lg text-sm" 
-                        placeholder="Ex: 31000"
-                      />
-                      <button onClick={() => salvarManualUsage('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
-                        {salvandoManual ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Salvar
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input 
-                        type="number" 
-                        value={inputManualQstashUsage} 
-                        onChange={e => setInputManualQstashUsage(e.target.value)}
-                        className="flex-1 p-2 border rounded-lg text-sm" 
-                        placeholder="Ex: 5000"
-                      />
-                      <button onClick={() => salvarManualUsage('qstash')} disabled={salvandoManual} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
-                        {salvandoManual ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Salvar
-                      </button>
-                    </div>
-                  )}
+                <div className="flex gap-2">
+                  <input 
+                    type="number" 
+                    value={inputInngest} 
+                    onChange={e => setInputInngest(e.target.value)}
+                    className="flex-1 p-2 border rounded-lg text-sm" 
+                    placeholder="Ex: 31000"
+                  />
+                  <button onClick={() => salvarContador('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
+                    <Check className="size-4" /> Salvar
+                  </button>
+                  <button onClick={() => zerarContador('inngest')} disabled={salvandoManual} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold">
+                    Zerar
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD QSTASH */}
+              <div className="bg-slate-50 border rounded-xl p-6">
+                <p className="text-sm font-bold text-slate-500 mb-1">Uso do QStash (Limite: 30.000)</p>
+                <div className="flex items-end gap-2 mb-4">
+                  <p className="text-4xl font-black text-slate-900">{qstashCounter.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 30.000</span></p>
+                </div>
+                <div className="flex gap-2">
+                  <input 
+                    type="number" 
+                    value={inputQstash} 
+                    onChange={e => setInputQstash(e.target.value)}
+                    className="flex-1 p-2 border rounded-lg text-sm" 
+                    placeholder="Ex: 527"
+                  />
+                  <button onClick={() => salvarContador('qstash')} disabled={salvandoManual} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
+                    <Check className="size-4" /> Salvar
+                  </button>
+                  <button onClick={() => zerarContador('qstash')} disabled={salvandoManual} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-sm font-bold">
+                    Zerar
+                  </button>
                 </div>
               </div>
             </div>
           </div>
 
-          <div>
+          <div className="pt-4 border-t border-slate-200">
             <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2"><Server className="size-5 text-indigo-600" /> Provedor Ativo</h3>
             <div className="flex flex-col md:flex-row gap-4">
               <button onClick={() => mudarProvider('inngest')} className={`flex-1 p-6 rounded-xl border-2 text-left transition-all ${providerAtivo === 'inngest' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`}>
                 <h4 className="font-bold text-lg text-slate-900">Inngest (Principal)</h4>
-                <p className="text-sm text-slate-600 mt-1">Limite: 50.000 execuções/mês.</p>
+                <p className="text-sm text-slate-600 mt-1">Motor principal de envio.</p>
                 {providerAtivo === 'inngest' && <span className="inline-block mt-3 text-xs font-bold text-blue-700 bg-blue-200 px-3 py-1 rounded-full">Em Uso</span>}
               </button>
               
               <button onClick={() => mudarProvider('qstash')} className={`flex-1 p-6 rounded-xl border-2 text-left transition-all ${providerAtivo === 'qstash' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300'}`}>
                 <h4 className="font-bold text-lg text-slate-900">QStash (Backup)</h4>
-                <p className="text-sm text-slate-600 mt-1">Limite: 1.000 mensagens/dia (30.000/mês). Processa lotes de 30.</p>
+                <p className="text-sm text-slate-600 mt-1">Motor alternativo para folga de cota.</p>
                 {providerAtivo === 'qstash' && <span className="inline-block mt-3 text-xs font-bold text-emerald-700 bg-emerald-200 px-3 py-1 rounded-full">Em Uso</span>}
               </button>
             </div>
