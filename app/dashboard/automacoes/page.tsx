@@ -178,7 +178,6 @@ export default function AutomacoesPage() {
       }
     } catch (err) { console.log("Falhou") }
     
-    // Fallback manual
     let continuar = true, falhas = 0
     while (continuar) {
       try {
@@ -315,8 +314,14 @@ export default function AutomacoesPage() {
                 <p className="text-4xl font-black text-slate-900">{enviadosMes.toLocaleString('pt-BR')}</p>
               </div>
               <div className="bg-slate-50 border rounded-xl p-6">
-                <p className="text-sm font-bold text-slate-500 mb-1">Gasto Estimado Inngest</p>
-                <p className="text-4xl font-black text-slate-900">~{(enviadosMes * 1.1).toFixed(0)} <span className="text-lg text-slate-400">/ 50.000</span></p>
+                <p className="text-sm font-bold text-slate-500 mb-1">
+                  {providerAtivo === 'inngest' ? 'Gasto Estimado Inngest' : 'Mensagens QStash (Lotes de 30)'}
+                </p>
+                {providerAtivo === 'inngest' ? (
+                  <p className="text-4xl font-black text-slate-900">~{(enviadosMes * 1.1).toFixed(0)} <span className="text-lg text-slate-400">/ 50.000</span></p>
+                ) : (
+                  <p className="text-4xl font-black text-slate-900">~{Math.ceil(enviadosMes / 30)} <span className="text-lg text-slate-400">/ 30.000</span></p>
+                )}
               </div>
             </div>
           </div>
