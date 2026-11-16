@@ -47,9 +47,8 @@ export default function AutomacoesPage() {
   
   const [abaPainel, setAbaPainel] = useState<'campanhas' | 'configuracoes'>('campanhas')
   const [providerAtivo, setProviderAtivo] = useState('inngest')
-  const [enviadosMes, setEnviadosMes] = useState(0)
   
-  // ✅ CONTADORES SIMPLIFICADOS
+  // ✅ CONTADORES MANUAIS
   const [inngestCounter, setInngestCounter] = useState(0)
   const [inputInngest, setInputInngest] = useState('')
   
@@ -84,7 +83,7 @@ export default function AutomacoesPage() {
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
   useEffect(() => { 
-    buscarListas(); buscarConfiguracoes(); buscarEstatisticasMes();
+    buscarListas(); buscarConfiguracoes();
   }, [])
   
   useEffect(() => { buscarCampanhas() }, [pageCampanhas])
@@ -116,12 +115,6 @@ export default function AutomacoesPage() {
     }
   }
 
-  const buscarEstatisticasMes = async () => {
-    const dataInicio = new Date(); dataInicio.setDate(1); dataInicio.setHours(0, 0, 0, 0);
-    const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('status', 'sent').gte('sent_at', dataInicio.toISOString());
-    setEnviadosMes(count || 0)
-  }
-
   const mudarProvider = async (novoProvider: string) => {
     const { data, error } = await supabase
       .from('system_settings')
@@ -140,7 +133,7 @@ export default function AutomacoesPage() {
     const isInngest = tipo === 'inngest';
     const inputTexto = isInngest ? inputInngest : inputQstash;
     
-    // ✅ CORREÇÃO: Remove tudo que não for número (pontos, vírgulas) antes de converter
+    // ✅ CORREÇÃO DEFINITIVA DO PONTO: Remove tudo que não for número antes de salvar
     const textoLimpo = inputTexto.replace(/\D/g, '')
     const valor = parseInt(textoLimpo, 10) || 0;
     
@@ -153,6 +146,7 @@ export default function AutomacoesPage() {
       .eq('id', 1)
 
     if (!error) {
+      // Atualiza a tela formatando o número de volta com pontos
       if (isInngest) { setInngestCounter(valor); setInputInngest(valor.toLocaleString('pt-BR')) }
       else { setQstashCounter(valor); setInputQstash(valor.toLocaleString('pt-BR')) }
       alert("✅ Contador atualizado!")
@@ -365,8 +359,8 @@ export default function AutomacoesPage() {
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
 
-  // ✅ CÁLCULOS DE ESTIMATIVA DE E-MAILS
-  // Inngest gasta cerca de 1.1 execuções por e-mail (incluindo steps e cron)
+  // ✅ CÁLCULO BASEADO PURAMENTE NO INPUT MANUAL
+  // Inngest gasta cerca de 1.1 execuções por e-mail enviado
   const execucoesRestantesInngest = Math.max(0, 50000 - inngestCounter);
   const emailsRestantesInngest = Math.floor(execucoesRestantesInngest / 1.1);
 
@@ -396,16 +390,8 @@ export default function AutomacoesPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* CARD INNGEST */}
               <div className="bg-slate-50 border rounded-xl p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <p className="text-sm font-bold text-slate-500">Uso do Inngest (Limite: 50.000)</p>
-                    <p className="text-4xl font-black text-slate-900">{inngestCounter.toLocaleString('pt-BR')}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-slate-500 mb-1">E-mails Enviados</p>
-                    <p className="text-xl font-black text-blue-600">{enviadosMes.toLocaleString('pt-BR')}</p>
-                  </div>
-                </div>
+                <p className="text-sm font-bold text-slate-500 mb-1">Uso do Inngest (Limite: 50.000)</p>
+                <p className="text-4xl font-black text-slate-900 mb-4">{inngestCounter.toLocaleString('pt-BR')}</p>
 
                 <div className="bg-white p-3 rounded-lg border border-slate-200 mb-4 flex items-center gap-2">
                   <TrendingUp className="size-5 text-emerald-500" />
@@ -434,16 +420,8 @@ export default function AutomacoesPage() {
 
               {/* CARD QSTASH */}
               <div className="bg-slate-50 border rounded-xl p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <p className="text-sm font-bold text-slate-500">Uso do QStash (Limite: 30.000)</p>
-                    <p className="text-4xl font-black text-slate-900">{qstashCounter.toLocaleString('pt-BR')}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-slate-500 mb-1">E-mails Enviados</p>
-                    <p className="text-xl font-black text-blue-600">{enviadosMes.toLocaleString('pt-BR')}</p>
-                  </div>
-                </div>
+                <p className="text-sm font-bold text-slate-500 mb-1">Uso do QStash (Limite: 30.000)</p>
+                <p className="text-4xl font-black text-slate-900 mb-4">{qstashCounter.toLocaleString('pt-BR')}</p>
 
                 <div className="bg-white p-3 rounded-lg border border-slate-200 mb-4 flex items-center gap-2">
                   <TrendingUp className="size-5 text-emerald-500" />
