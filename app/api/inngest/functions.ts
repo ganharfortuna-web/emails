@@ -3,35 +3,23 @@ import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
-// ==========================================
-// 1. FUNÇÃO PRINCIPAL DE ENVIO (Inngest)
-// ==========================================
 export const processarFilaEmails = inngest.createFunction(
-  { 
-    id: "processar-fila-emails", 
-    concurrency: 1,
-    triggers: [{ event: "campanha/iniciar" }] 
-  },
+  { id: "processar-fila-emails", concurrency: 1, triggers: [{ event: "campanha/iniciar" }] },
   async ({ event, step }) => {
     const { campanhaId } = event.data;
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
-    // 🛑 TRAVA DE SEGURANÇA: Verifica se o Inngest é o provedor ativo
     const statusProvedor = await step.run("checar-provedor", async () => {
       const { data } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single();
       return data?.active_provider;
     });
-
-    if (statusProvedor !== 'inngest') {
-      return "Ignorado: QStash está ativo no momento.";
-    }
+    if (statusProvedor !== 'inngest') return "Ignorado: QStash ativo.";
 
     const statusCampanha = await step.run("checar-status", async () => {
       const { data } = await supabase.from('campanhas').select('status').eq('id', campanhaId).single();
       return data?.status;
     });
-
     if (statusCampanha === 'Pausada') return "Campanha pausada.";
 
     const conta = await step.run("buscar-smtp", async () => {
@@ -40,15 +28,8 @@ export const processarFilaEmails = inngest.createFunction(
       return data;
     });
 
-    // ✅ OTIMIZAÇÃO: Aumentamos o lote para 50 e-mails
     const lote = await step.run("buscar-lote", async () => {
-      const { data } = await supabase
-        .from('email_queue')
-        .select('*')
-        .eq('campaign_id', campanhaId)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: true })
-        .limit(50); 
+      const { data } = await supabase.from('email_queue').select('*').eq('campaign_id', campanhaId).eq('status', 'pending').order('created_at', { ascending: true }).limit(30);
       return data || [];
     });
 
@@ -61,12 +42,10 @@ export const processarFilaEmails = inngest.createFunction(
     }
 
     const transporter = nodemailer.createTransport({
-      pool: true, maxConnections: 5, maxMessages: 100,
-      host: conta.host, port: Number(conta.port), secure: Number(conta.port) === 465,
+      pool: true, maxConnections: 5, maxMessages: 100, host: conta.host, port: Number(conta.port), secure: Number(conta.port) === 465,
       auth: { user: conta.email, pass: conta.app_password }, tls: { rejectUnauthorized: false },
     });
 
-    // ✅ OTIMIZAÇÃO EXTREMA: Todo o loop de 50 e-mails agora roda em 1 única execução!
     await step.run("processar-lote-emails", async () => {
       for (const item of lote) {
         try {
@@ -75,16 +54,12 @@ export const processarFilaEmails = inngest.createFunction(
           if (baseUrl) {
             corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`) + `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`;
           }
-          
           await transporter.sendMail({
             from: { name: conta.sender_name || 'Equipe', address: conta.sender_email || conta.email },
             to: item.recipient_email, subject: item.subject, html: corpo,
           });
-          
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);
-          
-          // Pequeno delay para não sobrecarregar o SMTP e evitar que o Vercel dê Timeout
           await new Promise(resolve => setTimeout(resolve, 100)); 
         } catch (err: any) {
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id);
@@ -110,33 +85,21 @@ export const processarFilaEmails = inngest.createFunction(
   }
 );
 
-// ==========================================
-// 2. CÃO DE GUARDA (A cada 10 minutos)
-// ==========================================
 export const autoRecuperacao = inngest.createFunction(
-  { 
-    id: "auto-recuperacao",
-    concurrency: 1,
-    triggers: [{ cron: "*/10 * * * *" }]
-  },
+  { id: "auto-recuperacao", concurrency: 1, triggers: [{ cron: "*/10 * * * *" }] },
   async ({ step }) => {
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-
-    // 🛑 TRAVA DE SEGURANÇA
+    
     const statusProvedor = await step.run("checar-provedor-cron", async () => {
       const { data } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single();
       return data?.active_provider;
     });
-
-    if (statusProvedor !== 'inngest') {
-      return "Ignorado: QStash está ativo no momento.";
-    }
+    if (statusProvedor !== 'inngest') return "Ignorado: QStash ativo.";
 
     const agendadasVencidas = await step.run("buscar-agendadas", async () => {
       const { data } = await supabase.from('campanhas').select('id').eq('status', 'Agendada').lte('scheduled_at', new Date().toISOString()); 
       return data || [];
     });
-
     for (const camp of agendadasVencidas) {
       await supabase.from('campanhas').update({ status: 'Enviando...' }).eq('id', camp.id);
       await step.sendEvent("iniciar", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
@@ -147,13 +110,11 @@ export const autoRecuperacao = inngest.createFunction(
       const { data } = await supabase.from('campanhas').select('id').eq('status', 'Enviando...').lt('updated_at', dataLimite);
       return data || [];
     });
-
     for (const camp of campanhasParadas) {
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', camp.id).eq('status', 'pending');
-      if (count && count > 0) {
-        await step.sendEvent("reativar", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
-      }
+      if (count && count > 0) await step.sendEvent("reativar", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
     }
+
     return `Agendamentos: ${agendadasVencidas.length}. Resgatadas: ${campanhasParadas.length}.`;
   }
 );
