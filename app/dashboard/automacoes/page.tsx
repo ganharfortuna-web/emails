@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, ChevronLeft, ChevronRight, Settings, Server, Activity, Check } from 'lucide-react'
+import { Send, Clock, Mail, Loader2, Hourglass, Trash2, CheckSquare, Square, Eye, MousePointerClick, Pencil, Zap, RefreshCw, Pause, Play, BarChart3, X, Users, AlertCircle, Copy, CalendarClock, RotateCcw, ShieldAlert, RefreshCcw, ChevronLeft, ChevronRight, Settings, Server, Activity, Check, TrendingUp } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
 
@@ -47,6 +47,7 @@ export default function AutomacoesPage() {
   
   const [abaPainel, setAbaPainel] = useState<'campanhas' | 'configuracoes'>('campanhas')
   const [providerAtivo, setProviderAtivo] = useState('inngest')
+  const [enviadosMes, setEnviadosMes] = useState(0)
   
   // ✅ CONTADORES SIMPLIFICADOS
   const [inngestCounter, setInngestCounter] = useState(0)
@@ -83,7 +84,7 @@ export default function AutomacoesPage() {
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
   useEffect(() => { 
-    buscarListas(); buscarConfiguracoes();
+    buscarListas(); buscarConfiguracoes(); buscarEstatisticasMes();
   }, [])
   
   useEffect(() => { buscarCampanhas() }, [pageCampanhas])
@@ -102,12 +103,23 @@ export default function AutomacoesPage() {
     const { data } = await supabase.from('system_settings').select('active_provider, inngest_counter, qstash_counter').eq('id', 1).single()
     if (data) {
       setProviderAtivo(data.active_provider)
+      
+      // Formata o valor salvo no banco com ponto para ficar bonito no input
+      const formatadoInngest = data.inngest_counter ? data.inngest_counter.toLocaleString('pt-BR') : ''
+      const formatadoQstash = data.qstash_counter ? data.qstash_counter.toLocaleString('pt-BR') : ''
+      
       setInngestCounter(data.inngest_counter || 0)
-      setInputInngest(data.inngest_counter ? String(data.inngest_counter) : '')
+      setInputInngest(formatadoInngest)
       
       setQstashCounter(data.qstash_counter || 0)
-      setInputQstash(data.qstash_counter ? String(data.qstash_counter) : '')
+      setInputQstash(formatadoQstash)
     }
+  }
+
+  const buscarEstatisticasMes = async () => {
+    const dataInicio = new Date(); dataInicio.setDate(1); dataInicio.setHours(0, 0, 0, 0);
+    const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('status', 'sent').gte('sent_at', dataInicio.toISOString());
+    setEnviadosMes(count || 0)
   }
 
   const mudarProvider = async (novoProvider: string) => {
@@ -126,7 +138,11 @@ export default function AutomacoesPage() {
 
   const salvarContador = async (tipo: 'inngest' | 'qstash') => {
     const isInngest = tipo === 'inngest';
-    const valor = parseInt(isInngest ? inputInngest : inputQstash, 10) || 0;
+    const inputTexto = isInngest ? inputInngest : inputQstash;
+    
+    // ✅ CORREÇÃO: Remove tudo que não for número (pontos, vírgulas) antes de converter
+    const textoLimpo = inputTexto.replace(/\D/g, '')
+    const valor = parseInt(textoLimpo, 10) || 0;
     
     setSalvandoManual(true)
     const campo = isInngest ? 'inngest_counter' : 'qstash_counter';
@@ -137,8 +153,8 @@ export default function AutomacoesPage() {
       .eq('id', 1)
 
     if (!error) {
-      if (isInngest) setInngestCounter(valor);
-      else setQstashCounter(valor);
+      if (isInngest) { setInngestCounter(valor); setInputInngest(valor.toLocaleString('pt-BR')) }
+      else { setQstashCounter(valor); setInputQstash(valor.toLocaleString('pt-BR')) }
       alert("✅ Contador atualizado!")
     } else {
       alert("Erro ao salvar: " + error.message)
@@ -349,6 +365,15 @@ export default function AutomacoesPage() {
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
 
+  // ✅ CÁLCULOS DE ESTIMATIVA DE E-MAILS
+  // Inngest gasta cerca de 1.1 execuções por e-mail (incluindo steps e cron)
+  const execucoesRestantesInngest = Math.max(0, 50000 - inngestCounter);
+  const emailsRestantesInngest = Math.floor(execucoesRestantesInngest / 1.1);
+
+  // QStash gasta exatamente 1 mensagem por lote de 30 e-mails
+  const mensagensRestantesQstash = Math.max(0, 30000 - qstashCounter);
+  const emailsRestantesQstash = mensagensRestantesQstash * 30;
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-4">
@@ -365,23 +390,38 @@ export default function AutomacoesPage() {
       {abaPainel === 'configuracoes' ? (
         <div className="bg-white rounded-2xl border shadow-sm p-8 space-y-8 animate-in fade-in">
           <div>
-            <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2"><Activity className="size-5 text-indigo-600" /> Contadores Manuais</h3>
-            <p className="text-sm text-slate-500 mb-6">Digite o valor exato que aparece no painel do seu provedor e salve. O contador fica salvo até você decidir zerar.</p>
+            <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2"><Activity className="size-5 text-indigo-600" /> Contadores e Estimativas</h3>
+            <p className="text-sm text-slate-500 mb-6">Digite o valor exato que aparece no painel do seu provedor e salve. O sistema calcula quantos envios ainda restam.</p>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* CARD INNGEST */}
               <div className="bg-slate-50 border rounded-xl p-6">
-                <p className="text-sm font-bold text-slate-500 mb-1">Uso do Inngest (Limite: 50.000)</p>
-                <div className="flex items-end gap-2 mb-4">
-                  <p className="text-4xl font-black text-slate-900">{inngestCounter.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 50.000</span></p>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <p className="text-sm font-bold text-slate-500">Uso do Inngest (Limite: 50.000)</p>
+                    <p className="text-4xl font-black text-slate-900">{inngestCounter.toLocaleString('pt-BR')}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-slate-500 mb-1">E-mails Enviados</p>
+                    <p className="text-xl font-black text-blue-600">{enviadosMes.toLocaleString('pt-BR')}</p>
+                  </div>
                 </div>
+
+                <div className="bg-white p-3 rounded-lg border border-slate-200 mb-4 flex items-center gap-2">
+                  <TrendingUp className="size-5 text-emerald-500" />
+                  <div>
+                    <p className="text-xs text-slate-500 font-bold">Estimativa de Envios Restantes</p>
+                    <p className="text-lg font-black text-emerald-600">~ {emailsRestantesInngest.toLocaleString('pt-BR')} e-mails</p>
+                  </div>
+                </div>
+
                 <div className="flex gap-2">
                   <input 
-                    type="number" 
+                    type="text" 
                     value={inputInngest} 
                     onChange={e => setInputInngest(e.target.value)}
                     className="flex-1 p-2 border rounded-lg text-sm" 
-                    placeholder="Ex: 31000"
+                    placeholder="Ex: 31.000"
                   />
                   <button onClick={() => salvarContador('inngest')} disabled={salvandoManual} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1">
                     <Check className="size-4" /> Salvar
@@ -394,13 +434,28 @@ export default function AutomacoesPage() {
 
               {/* CARD QSTASH */}
               <div className="bg-slate-50 border rounded-xl p-6">
-                <p className="text-sm font-bold text-slate-500 mb-1">Uso do QStash (Limite: 30.000)</p>
-                <div className="flex items-end gap-2 mb-4">
-                  <p className="text-4xl font-black text-slate-900">{qstashCounter.toLocaleString('pt-BR')} <span className="text-lg text-slate-400">/ 30.000</span></p>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <p className="text-sm font-bold text-slate-500">Uso do QStash (Limite: 30.000)</p>
+                    <p className="text-4xl font-black text-slate-900">{qstashCounter.toLocaleString('pt-BR')}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-slate-500 mb-1">E-mails Enviados</p>
+                    <p className="text-xl font-black text-blue-600">{enviadosMes.toLocaleString('pt-BR')}</p>
+                  </div>
                 </div>
+
+                <div className="bg-white p-3 rounded-lg border border-slate-200 mb-4 flex items-center gap-2">
+                  <TrendingUp className="size-5 text-emerald-500" />
+                  <div>
+                    <p className="text-xs text-slate-500 font-bold">Estimativa de Envios Restantes</p>
+                    <p className="text-lg font-black text-emerald-600">~ {emailsRestantesQstash.toLocaleString('pt-BR')} e-mails</p>
+                  </div>
+                </div>
+
                 <div className="flex gap-2">
                   <input 
-                    type="number" 
+                    type="text" 
                     value={inputQstash} 
                     onChange={e => setInputQstash(e.target.value)}
                     className="flex-1 p-2 border rounded-lg text-sm" 
