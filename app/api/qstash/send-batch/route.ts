@@ -36,11 +36,22 @@ export async function POST(request: Request) {
       query = query.not('campaign_id', 'in', `(${idsPausados.join(',')})`)
     }
 
-    const { data: loteRaw } = await query.order('created_at', { ascending: true }).limit(BATCH_SIZE * 3)
-    const lote = (loteRaw || []).filter((i: any) => !emailsSuprimidos.has((i.recipient_email || '').toLowerCase())).slice(0, BATCH_SIZE)
+    const { data: loteRaw } = await query.order('created_at', { ascending: true }).limit(BATCH_SIZE * 2)
+    
+    const lote: any[] = []
+    
+    // 🛑 CORREÇÃO AQUI: Lógica que marca os descadastrados como falha e não deixa a fila travar
+    for (const item of (loteRaw || [])) {
+      if (emailsSuprimidos.has((item.recipient_email || '').toLowerCase())) {
+        await supabase.from('email_queue').update({ status: 'failed', error_log: 'Ignorado: E-mail descadastrado.' }).eq('id', item.id)
+        continue
+      }
+      lote.push(item)
+      if (lote.length >= BATCH_SIZE) break
+    }
 
     if (lote.length === 0) {
-      return NextResponse.json({ message: 'Fila vazia ou campanhas pausadas' })
+      return NextResponse.json({ message: 'Fila vazia ou apenas descadastrados' })
     }
 
     const transporter = nodemailer.createTransport({
@@ -107,7 +118,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 🛑 TRAVA DE FINALIZAÇÃO: Verifica se a fila da campanha zerou
+    // 🛑 TRAVA DE FINALIZAÇÃO CORRIGIDA
     const campanhasAfetadas = Array.from(new Set(lote.map((i: any) => i.campaign_id)));
     
     for (const campId of campanhasAfetadas) {
