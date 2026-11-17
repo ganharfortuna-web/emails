@@ -10,7 +10,7 @@ const BATCH_SIZE = 30
 export async function POST(request: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  let baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
+  let baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://ganharfortuna-web.vercel.app'
   if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1)
 
   if (!supabaseUrl || !supabaseKey) return NextResponse.json({ error: 'Env vars faltando' }, { status: 500 })
@@ -87,22 +87,31 @@ export async function POST(request: Request) {
 
       let htmlFinal = corpoPersonalizado
       if (baseUrl) {
-        // ✅ TRAVA: Ignora a reescrita se o link for de descadastro
         htmlFinal = htmlFinal.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => {
           if (url.includes('/api/unsubscribe')) return _m;
           return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
         });
         
-        if (!htmlFinal.includes('descadastrar')) {
-          htmlFinal += `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`;
+        if (!/(descadastr|unsubscribe)/i.test(htmlFinal)) {
+          htmlFinal += `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" clicktracking="off" data-msys-clicktrack="0" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`;
         }
         htmlFinal += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
       }
 
+      // ENVELOPA O HTML PARA NÃO QUEBRAR O LINK
+      const htmlEnvelopado = `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body>${htmlFinal}</body>
+        </html>
+      `;
+
       try {
         await transporter.sendMail({
           from: { name: (contaUnica.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''), address: contaUnica.sender_email || contaUnica.email },
-          to: item.recipient_email, subject: item.subject, html: htmlFinal,
+          to: item.recipient_email, subject: item.subject, html: htmlEnvelopado,
+          headers: { 'List-Unsubscribe': `<${unsubUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
         })
 
         await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0, smtp_account_id: contaUnica.id }).eq('id', item.id)

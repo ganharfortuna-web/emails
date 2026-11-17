@@ -26,13 +26,11 @@ export async function GET(request: Request) {
     const { data: conta } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single()
     if (!conta) return NextResponse.json({ error: 'Sem conta SMTP' }, { status: 400 })
 
-    // 🛑 CHECA A LISTA DE SUPRESSÃO (NÃO ENVIA PARA QUEM JÁ DESCADASTROU)
     const { data: suprimidos } = await supabase.from('suppression_list').select('email')
     const emailsSuprimidos = new Set((suprimidos || []).map((s: any) => (s.email || '').toLowerCase()))
 
     const { data: loteRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100)
     
-    // Filtra quem está descadastrado
     const lote = (loteRaw || []).filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase())).slice(0, 30)
 
     if (lote.length === 0) return NextResponse.json({ message: 'Fila vazia ou todos descadastrados' })
@@ -64,12 +62,11 @@ export async function GET(request: Request) {
           corpo += `
             <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
               <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">${item.recipient_email}</strong></p>
-              <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="${unsubUrl}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+              <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="${unsubUrl}" clicktracking="off" data-msys-clicktrack="0" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
             </div>
           `;
         }
 
-        // 🛑 ESTRUTURA HTML COMPLETA (Evita o erro ERR_INVALID_REDIRECT)
         const htmlFinal = `
           <!DOCTYPE html>
           <html>
