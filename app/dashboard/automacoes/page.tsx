@@ -285,11 +285,22 @@ export default function AutomacoesPage() {
     if (!listaSelecionada || !assunto || !mensagem) { alert("Preencha os campos."); return }
     setEnviando(true)
 
-    // O backend agora vai injetar o rodapé formatado, então salvamos o texto puro.
+    // 🛑 INJEÇÃO DO RODAPÉ DIRETO NO FRONTEND
+    // Isso garante que o link vá para o banco de dados antes mesmo do backend rodar
+    let mensagemComRodape = mensagem;
+    if (!/(descadastr|unsubscribe)/i.test(mensagemComRodape)) {
+      mensagemComRodape += `
+        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">{{email}}</strong></p>
+          <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+        </div>
+      `;
+    }
+
     const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ 
       lista_id: listaSelecionada, 
       assunto, 
-      mensagem: mensagem,
+      mensagem: mensagemComRodape, // <-- SALVA COM O RODAPÉ
       status: 'Em Fila', 
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null 
     }]).select().single()
@@ -532,7 +543,7 @@ export default function AutomacoesPage() {
                 <div className="bg-white rounded-xl border overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:!text-black">
                   <ReactQuill theme="snow" value={mensagem} onChange={setMensagem} modules={modulosEditor} />
                 </div>
-                <p className="text-xs text-blue-600 mt-1 font-medium">✨ O rodapé com o e-mail do cliente e o link de descadastro será adicionado automaticamente ao enviar.</p>
+                <p className="text-xs text-blue-600 mt-1 font-medium">✨ O rodapé com o e-mail do cliente e o link de descadastro será adicionado automaticamente.</p>
                 <button type="submit" disabled={enviando} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl flex justify-center gap-2">
                   {enviando ? <Loader2 className="animate-spin" /> : <Send />} {enviando ? 'Processando...' : scheduledAt ? 'Agendar Campanha' : 'Enviar Campanha'}
                 </button>
