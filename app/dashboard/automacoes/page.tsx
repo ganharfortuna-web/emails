@@ -285,11 +285,11 @@ export default function AutomacoesPage() {
     if (!listaSelecionada || !assunto || !mensagem) { alert("Preencha os campos."); return }
     setEnviando(true)
 
-    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR
+    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR (PADRONIZADO)
     let corpoFinal = mensagem;
     if (!mensagem.includes('descadastrar')) {
       corpoFinal += `
-        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.5;">
+        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
           <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">{{email}}</strong></p>
           <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
         </div>

@@ -135,20 +135,20 @@ export default function PaginasBuilderPage() {
 
     const slugFormatado = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 
-    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR
+    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR (PADRONIZADO)
     let corpoFinal = corpo;
     if (!corpo.includes('descadastrar')) {
       corpoFinal += `
-        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 12px; color: #64748b;">
-          <p>Este e-mail foi enviado para: <strong>{{email}}</strong></p>
-          <p>Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">{{email}}</strong></p>
+          <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
         </div>
       `;
     }
 
     const payload = {
       titulo, subtitulo, slug: slugFormatado, lista_id: listaId,
-      email_assunto: assunto, email_corpo: corpoFinal,
+      email_assunto: assunto, email_corpo: corpoFinal, // <-- USA O CORPO COM RODAPÉ
       bg_color: bgColor, button_color: btnColor, hero_image_url: heroImageUrl, layout_type: layoutType,
       thank_you_type: thankYouType,
       redirect_url: thankYouType === 'external' ? redirectUrl : '',
@@ -274,7 +274,6 @@ export default function PaginasBuilderPage() {
               <input type="text" required value={assunto} onChange={e => setAssunto(e.target.value)} className="w-full p-3 border rounded-lg" />
             </div>
             <div>
-              {/* ✅ TEXTO DE AJUDA ATUALIZADO AQUI */}
               <label className="block text-sm font-bold text-slate-700 mb-2">
                 Corpo do E-mail 
                 <span className="text-slate-400 font-normal ml-1">
