@@ -10,7 +10,6 @@ export async function GET(request: Request) {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
 
   if (!supabaseUrl || !supabaseKey) {
     return new Response('Erro de configuração', { status: 500 })
@@ -21,7 +20,7 @@ export async function GET(request: Request) {
   try {
     let emailFinal = email
 
-    // Se veio só o ID, busca o e-mail
+    // Se veio só o ID, busca o e-mail na fila
     if (!emailFinal && id) {
       const { data } = await supabase
         .from('email_queue')
@@ -32,16 +31,32 @@ export async function GET(request: Request) {
     }
 
     if (!emailFinal) {
-      return new Response('E-mail não informado', { status: 400 })
+      return new Response('E-mail não informado ou link inválido', { status: 400 })
     }
 
-    // Marca o contato como descadastrado
+    const emailLimpo = emailFinal.toLowerCase().trim()
+
+    // 1. BLOQUEIO DEFINITIVO: Adiciona na lista de supressão
+    await supabase.from('suppression_list').upsert(
+      [{ email: emailLimpo, reason: 'unsubscribe', original_error: 'Descadastro via link do e-mail' }],
+      { onConflict: 'email' }
+    )
+
+    // 2. Marca o contato como descadastrado
     await supabase
       .from('contatos')
       .update({ status: 'descadastrado' })
-      .eq('email', emailFinal.toLowerCase())
+      .eq('email', emailLimpo)
 
-    // Retorna uma página HTML de confirmação
+    // 3. Atualiza o status na fila de envio
+    if (id) {
+      await supabase
+        .from('email_queue')
+        .update({ status: 'suppressed' })
+        .eq('id', id)
+    }
+
+    // Retorna a página HTML de confirmação
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -63,7 +78,7 @@ export async function GET(request: Request) {
     <div class="icon">✅</div>
     <h1>Descadastro confirmado</h1>
     <p>Você não receberá mais e-mails deste remetente.</p>
-    <span class="email">${emailFinal}</span>
+    <span class="email">${emailLimpo}</span>
     <div class="footer">Sistema Envios</div>
   </div>
 </body>
@@ -73,6 +88,6 @@ export async function GET(request: Request) {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     })
   } catch (error: any) {
-    return new Response(`Erro: ${error.message}`, { status: 500 })
+    return new Response(`Erro ao processar descadastro: ${error.message}`, { status: 500 })
   }
 }
