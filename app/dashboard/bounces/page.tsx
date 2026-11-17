@@ -12,7 +12,6 @@ export default function BouncesPage() {
   const [reativando, setReativando] = useState(false)
   const [filtro, setFiltro] = useState<'todos' | 'hard_bounce' | 'soft_bounce' | 'complaint'>('todos')
   
-  // ✅ ESTADOS DA PAGINAÇÃO
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [deletandoTodos, setDeletandoTodos] = useState(false)
@@ -41,7 +40,6 @@ export default function BouncesPage() {
     const { data, count, error } = await query
 
     if (!error && data) {
-      // 🛑 CORREÇÃO: Se a página atual ficou vazia (ex: apagou o último item), volta uma página
       if (data.length === 0 && page > 0 && (count || 0) > 0) {
         setPage(page - 1)
         return
@@ -95,7 +93,6 @@ export default function BouncesPage() {
   const reativarUm = async (email: string) => {
     if (!confirm(`Tem certeza que deseja reativar o e-mail ${email}?`)) return
     
-    // 🛑 CORREÇÃO: Mostra o loading e avisa o usuário
     setCarregando(true)
     await supabase.from('suppression_list').delete().eq('email', email)
     await supabase.from('contatos').update({ status: 'ativo', bounce_count: 0 }).eq('email', email)
@@ -244,8 +241,17 @@ export default function BouncesPage() {
                   <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4 font-medium text-slate-800">{s.email}</td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-bold border ${s.reason === 'hard_bounce' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
-                        {s.reason === 'hard_bounce' ? 'Hard Bounce' : s.reason === 'complaint' ? 'Spam/Reclamação' : 'Soft Bounce'}
+                      {/* 🛑 CORREÇÃO AQUI: Renderização exata do motivo */}
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-bold border ${
+                        s.reason === 'hard_bounce' ? 'bg-red-50 text-red-700 border-red-100' : 
+                        s.reason === 'complaint' ? 'bg-orange-50 text-orange-700 border-orange-100' : 
+                        s.reason === 'soft_bounce' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                        'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}>
+                        {s.reason === 'hard_bounce' ? 'Hard Bounce' : 
+                         s.reason === 'complaint' ? 'Spam/Reclamação' : 
+                         s.reason === 'soft_bounce' ? 'Soft Bounce' : 
+                         s.reason /* Mostra o valor bruto se for desconhecido */}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-500">
