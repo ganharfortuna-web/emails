@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { AlertTriangle, CheckCircle2, RotateCcw, Loader2, ShieldAlert, Download, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, RotateCcw, Loader2, Download, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
@@ -25,13 +25,12 @@ export default function BouncesPage() {
   const carregarLista = async () => {
     setCarregando(true)
     
-    // Define o range para buscar apenas 100 itens
     const from = page * pageSize
     const to = from + pageSize - 1
 
     let query = supabase
       .from('suppression_list')
-      .select('*', { count: 'exact' }) // Pede a contagem total para sabermos quantas páginas tem
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to)
 
@@ -42,13 +41,17 @@ export default function BouncesPage() {
     const { data, count, error } = await query
 
     if (!error && data) {
+      // 🛑 CORREÇÃO: Se a página atual ficou vazia (ex: apagou o último item), volta uma página
+      if (data.length === 0 && page > 0 && (count || 0) > 0) {
+        setPage(page - 1)
+        return
+      }
       setSuprimidos(data)
       setTotalCount(count || 0)
     }
     setCarregando(false)
   }
 
-  // ✅ FUNÇÃO PARA BAIXAR CSV (Busca TUDO de forma paginada para não travar)
   const baixarCSV = async () => {
     if (totalCount === 0) return
     setCarregando(true)
@@ -92,9 +95,12 @@ export default function BouncesPage() {
   const reativarUm = async (email: string) => {
     if (!confirm(`Tem certeza que deseja reativar o e-mail ${email}?`)) return
     
+    // 🛑 CORREÇÃO: Mostra o loading e avisa o usuário
+    setCarregando(true)
     await supabase.from('suppression_list').delete().eq('email', email)
     await supabase.from('contatos').update({ status: 'ativo', bounce_count: 0 }).eq('email', email)
     
+    alert(`✅ E-mail ${email} reativado!\n\nEle foi removido da lista de bloqueio e voltou para a aba de "Contatos".`)
     carregarLista()
   }
 
@@ -104,7 +110,6 @@ export default function BouncesPage() {
 
     setReativando(true)
     try {
-      // Busca todos os e-mails (ou apenas os filtrados)
       let emails: string[] = []
       let currentPage = 0
       let hasMore = true
@@ -138,13 +143,11 @@ export default function BouncesPage() {
     setReativando(false)
   }
 
-  // ✅ FUNÇÃO PARA APAGAR TUDO
   const apagarTudo = async () => {
     if (!confirm("🚨 CUIDADO EXTREMO! 🚨\n\nVocê está prestes a apagar TODOS os registros da lista de supressão.\nIsso significa que esses e-mails não estarão mais bloqueados (a menos que estejam na lista de contatos com status bounced).\n\nTem certeza absoluta que deseja apagar TUDO?")) return
     
     setDeletandoTodos(true)
     try {
-      // A forma mais segura de deletar todos no Supabase é usando neq com um ID aleatório que não existe
       await supabase.from('suppression_list').delete().neq('id', '00000000-0000-0000-0000-000000000000')
       alert("✅ Lista de supressão esvaziada com sucesso!")
       setPage(0)
@@ -167,7 +170,6 @@ export default function BouncesPage() {
         </div>
         
         <div className="flex gap-2">
-          {/* ✅ BOTÃO APAGAR TUDO */}
           <button 
             onClick={apagarTudo} 
             disabled={totalCount === 0 || deletandoTodos}
@@ -187,7 +189,6 @@ export default function BouncesPage() {
         </div>
       </div>
 
-      {/* ALERTA DE AVISO */}
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex gap-3">
           <AlertTriangle className="size-6 text-amber-600 shrink-0 mt-0.5" />
@@ -211,14 +212,12 @@ export default function BouncesPage() {
         )}
       </div>
 
-      {/* FILTROS */}
       <div className="flex gap-2 bg-white p-2 rounded-xl border border-slate-200 w-fit shadow-sm overflow-x-auto">
         <button onClick={() => { setFiltro('todos'); setPage(0); }} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${filtro === 'todos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
         <button onClick={() => { setFiltro('hard_bounce'); setPage(0); }} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${filtro === 'hard_bounce' ? 'bg-red-100 text-red-700' : 'text-slate-500 hover:bg-slate-50'}`}>Hard Bounce</button>
         <button onClick={() => { setFiltro('soft_bounce'); setPage(0); }} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${filtro === 'soft_bounce' ? 'bg-amber-100 text-amber-700' : 'text-slate-500 hover:bg-slate-50'}`}>Soft Bounce</button>
       </div>
 
-      {/* TABELA */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -264,7 +263,6 @@ export default function BouncesPage() {
           </table>
         </div>
 
-        {/* ✅ CONTROLES DE PAGINAÇÃO */}
         {totalCount > 0 && (
           <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
             <span className="text-sm text-slate-500 font-medium">
