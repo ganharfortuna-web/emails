@@ -148,7 +148,7 @@ export default function PaginasBuilderPage() {
 
     const payload = {
       titulo, subtitulo, slug: slugFormatado, lista_id: listaId,
-      email_assunto: assunto, email_corpo: corpoFinal, // <-- USA O CORPO COM RODAPÉ
+      email_assunto: assunto, email_corpo: corpoFinal,
       bg_color: bgColor, button_color: btnColor, hero_image_url: heroImageUrl, layout_type: layoutType,
       thank_you_type: thankYouType,
       redirect_url: thankYouType === 'external' ? redirectUrl : '',
@@ -274,7 +274,13 @@ export default function PaginasBuilderPage() {
               <input type="text" required value={assunto} onChange={e => setAssunto(e.target.value)} className="w-full p-3 border rounded-lg" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Corpo do E-mail <span className="text-slate-400 font-normal">(Use &#123;&#123;nome&#125;&#125; para personalizar)</span></label>
+              {/* ✅ TEXTO DE AJUDA ATUALIZADO AQUI */}
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                Corpo do E-mail 
+                <span className="text-slate-400 font-normal ml-1">
+                  (Use &#123;&#123;nome&#125;&#125; e &#123;&#123;email&#125;&#125; para personalizar)
+                </span>
+              </label>
               <div className="bg-white rounded-xl border border-slate-200 overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[150px] [&_.ql-editor]:!text-black">
                 <ReactQuill theme="snow" value={corpo} onChange={setCorpo} modules={modulosEditor} />
               </div>

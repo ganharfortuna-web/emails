@@ -4,7 +4,7 @@ import nodemailer from "nodemailer";
 import { prepararHtmlEmail } from "@/lib/email-html";
 
 export const processarFilaEmails = inngest.createFunction(
-  { id: "processar-fila-emails", concurrency: 1, triggers: [{ event: "campanha/iniciar" }] },
+  { id: "processar-fila-emails", concurrency: 1, triggers: [{ event: "campanha/iniciar" }], retries: 3 },
   async ({ event, step }) => {
     const { campanhaId } = event.data;
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -29,7 +29,7 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     const lote = await step.run("buscar-lote", async () => {
-      const { data } = await supabase.from('email_queue').select('*').eq('campaign_id', campanhaId).eq('status', 'pending').order('created_at', { ascending: true }).limit(30);
+      const { data } = await supabase.from('email_queue').select('*').eq('campaign_id', campanhaId).eq('status', 'pending').order('created_at', { ascending: true }).limit(10);
       return data || [];
     });
 
@@ -49,11 +49,27 @@ export const processarFilaEmails = inngest.createFunction(
     await step.run("processar-lote-emails", async () => {
       for (const item of lote) {
         try {
-          let corpo = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente');
+          await supabase.from('campanhas').update({ updated_at: new Date().toISOString() }).eq('id', campanhaId);
+
+          // ✅ Substitui as variáveis, incluindo o link de descadastro
+          const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email || '')}`;
+          let corpo = (item.body || '')
+            .replace(/\{\{email\}\}/gi, item.recipient_email || '')
+            .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+            .replace(/\{\{unsubscribe_link\}\}/gi, unsubUrl);
+            
           corpo = prepararHtmlEmail(corpo);
+          
           if (baseUrl) {
-            corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`) + `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`;
+            corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`);
+            
+            // ✅ Só adiciona o rodapé padrão se o corpo não tiver um link de descadastro
+            if (!corpo.includes('descadastrar')) {
+               corpo += `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`;
+            }
+            corpo += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`;
           }
+
           await transporter.sendMail({
             from: { name: conta.sender_name || 'Equipe', address: conta.sender_email || conta.email },
             to: item.recipient_email, subject: item.subject, html: corpo,
@@ -73,7 +89,7 @@ export const processarFilaEmails = inngest.createFunction(
     });
 
     if (restantes > 0) {
-      await step.sleep("aguardar", "5s"); 
+      await step.sleep("aguardar", "2s"); 
       await step.sendEvent("continuar", { name: "campanha/iniciar", data: { campanhaId } });
       return `Lote enviado. Restam ${restantes}.`;
     }
@@ -112,9 +128,11 @@ export const autoRecuperacao = inngest.createFunction(
     });
     for (const camp of campanhasParadas) {
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', camp.id).eq('status', 'pending');
-      if (count && count > 0) await step.sendEvent("reativar", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
+      if (count && count > 0) {
+        await supabase.from('campanhas').update({ updated_at: new Date().toISOString() }).eq('id', camp.id);
+        await step.sendEvent("reativar", { name: "campanha/iniciar", data: { campanhaId: camp.id } });
+      }
     }
-
     return `Agendamentos: ${agendadasVencidas.length}. Resgatadas: ${campanhasParadas.length}.`;
   }
 );

@@ -47,15 +47,11 @@ export async function GET(request: Request) {
     const agora = new Date().toISOString()
     let query = supabase.from('email_queue').select('*').eq('status', 'pending').or(`next_retry_at.is.null,next_retry_at.lte.${agora}`).order('created_at', { ascending: true }).limit(30)
     
-    // Se veio um ID específico, processa só ele
     if (campanhaIdFiltro) query = query.eq('campaign_id', campanhaIdFiltro)
 
     const { data: filaRaw, error: filaError } = await query
     if (filaError || !filaRaw || filaRaw.length === 0) {
-      // Se a fila esvaziou, atualiza a campanha para Enviada
-      if (campanhaIdFiltro) {
-        await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaIdFiltro)
-      }
+      if (campanhaIdFiltro) await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaIdFiltro)
       return NextResponse.json({ message: 'Nada pendente.' })
     }
 
@@ -76,16 +72,24 @@ export async function GET(request: Request) {
         connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
       })
 
-      let corpoPersonalizado = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+      const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email || '')}`;
+      let corpoPersonalizado = (item.body || '')
+        .replace(/\{\{email\}\}/gi, item.recipient_email || '')
+        .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+        .replace(/\{\{unsubscribe_link\}\}/gi, unsubUrl);
+        
       corpoPersonalizado = prepararHtmlEmail(corpoPersonalizado)
 
       let htmlFinal = corpoPersonalizado
       if (baseUrl) {
         htmlFinal = htmlFinal.replace(/href="(https?:\/\/[^"]+)"/g, (_m: string, url: string) => `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`)
-        const pixel = `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
-        const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email)}`
-        const footer = `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`
-        htmlFinal += footer + pixel
+        
+        // Só adiciona o rodapé padrão se o corpo não tiver um link de descadastro
+        if (!htmlFinal.includes('descadastrar')) {
+          const footer = `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`
+          htmlFinal += footer
+        }
+        htmlFinal += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
       }
 
       try {
@@ -114,6 +118,17 @@ export async function GET(request: Request) {
           await supabase.from('email_queue').update({ status: 'pending', error_log: err.message?.slice(0, 500), bounce_type: classificacao.type, retry_count: retryCount, next_retry_at: calcularProximaTentativa(retryCount).toISOString() }).eq('id', item.id)
         } else {
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500), bounce_type: classificacao.type, retry_count: retryCount }).eq('id', item.id)
+          if (classificacao.action === 'block_contact') {
+            await supabase.from('contatos').update({ status: 'bounced', last_bounce_at: new Date().toISOString(), last_bounce_reason: err.message?.slice(0, 300) }).eq('email', (item.recipient_email || '').toLowerCase())
+            await supabase.from('suppression_list').upsert([{ email: (item.recipient_email || '').toLowerCase(), reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce', original_error: err.message?.slice(0, 300) }], { onConflict: 'email' })
+          }
+          if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
+            const { data: contato } = await supabase.from('contatos').select('bounce_count').eq('email', (item.recipient_email || '').toLowerCase()).single()
+            await supabase.from('contatos').update({ bounce_count: (contato?.bounce_count || 0) + 1, last_bounce_at: new Date().toISOString() }).eq('email', (item.recipient_email || '').toLowerCase())
+          }
+          if (classificacao.action === 'disable_account') {
+            await supabase.from('smtp_accounts').update({ is_active: false }).eq('id', contaAtual.id)
+          }
         }
       }
     }
@@ -122,10 +137,8 @@ export async function GET(request: Request) {
       if (idsPausados.includes(cid)) continue
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', cid).eq('status', 'pending')
       
-      // Se for a campanha filtrada, vê se ainda tem e-mails ou se já acabou
       await supabase.from('campanhas').update({ status: (count || 0) === 0 ? 'Enviada' : 'Enviando...', updated_at: new Date().toISOString() }).eq('id', cid)
 
-      // ✅ O SEGREDO DO LOOP: Se ainda tem e-mails pendentes, avisa o QStash para chamar o próximo lote!
       if ((count || 0) > 0 && qstashUrl && qstashToken) {
         await fetch(qstashUrl, {
           method: 'POST',
