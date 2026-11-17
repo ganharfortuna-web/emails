@@ -73,7 +73,11 @@ export default function AutomacoesPage() {
   const [modalDetalhes, setModalDetalhes] = useState<any>(null)
   const [modalErros, setModalErros] = useState<any>(null)
   const [listaErros, setListaErros] = useState<any[]>([])
-  const [tipoSegmento, setTipoSegmento] = useState<'enviados' | 'abridores' | 'clicadores' | 'nao_abriram'>('enviados')
+  
+  // ESTADOS PARA SEGMENTAÇÃO
+  const [tipoSegmento, setTipoSegmento] = useState<'enviados' | 'abridores' | 'clicadores' | 'engajados' | 'nao_abriram'>('enviados')
+  const [acaoSegmento, setAcaoSegmento] = useState<'mover' | 'copiar'>('mover')
+  
   const [nomeNovaLista, setNomeNovaLista] = useState('')
   const [criandoLista, setCriandoLista] = useState(false)
   const [msgSucesso, setMsgSucesso] = useState('')
@@ -285,8 +289,6 @@ export default function AutomacoesPage() {
     if (!listaSelecionada || !assunto || !mensagem) { alert("Preencha os campos."); return }
     setEnviando(true)
 
-    // 🛑 INJEÇÃO DO RODAPÉ DIRETO NO FRONTEND
-    // Isso garante que o link vá para o banco de dados antes mesmo do backend rodar
     let mensagemComRodape = mensagem;
     if (!/(descadastr|unsubscribe)/i.test(mensagemComRodape)) {
       mensagemComRodape += `
@@ -300,7 +302,7 @@ export default function AutomacoesPage() {
     const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ 
       lista_id: listaSelecionada, 
       assunto, 
-      mensagem: mensagemComRodape, // <-- SALVA COM O RODAPÉ
+      mensagem: mensagemComRodape,
       status: 'Em Fila', 
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null 
     }]).select().single()
@@ -371,6 +373,7 @@ export default function AutomacoesPage() {
     } catch (err: any) { alert("Erro: " + err.message); setProcessandoReenvio(false) }
   }
 
+  // 🛑 LÓGICA DE SEGMENTAÇÃO CORRIGIDA
   const criarSegmento = async () => {
     if (!modalDetalhes) return;
     if (modoInsercao === 'nova' && !nomeNovaLista.trim()) return alert("Digite o nome da nova lista.");
@@ -381,10 +384,13 @@ export default function AutomacoesPage() {
       let todosContatos: any[] = []; let page = 0; const pageSize = 1000; let hasMore = true
       while (hasMore) {
         let query = supabase.from('email_queue').select('recipient_email, recipient_name, opened_at, clicked_at, status').eq('campaign_id', modalDetalhes.id).range(page * pageSize, (page + 1) * pageSize - 1)
+        
         if (tipoSegmento === 'enviados') query = query.eq('status', 'sent')
         else if (tipoSegmento === 'abridores') query = query.not('opened_at', 'is', null)
         else if (tipoSegmento === 'clicadores') query = query.not('clicked_at', 'is', null)
+        else if (tipoSegmento === 'engajados') query = query.or('opened_at.not.is.null,clicked_at.not.is.null')
         else if (tipoSegmento === 'nao_abriram') query = query.eq('status', 'sent').is('opened_at', null)
+        
         const { data, error } = await query; if (error) throw error
         if (data && data.length > 0) { todosContatos = [...todosContatos, ...data]; if (data.length < pageSize) hasMore = false; else page++ } else { hasMore = false }
       }
@@ -401,13 +407,39 @@ export default function AutomacoesPage() {
       }
 
       const vistos = new Set<string>()
-      const novosContatos = todosContatos.filter(i => { const e = (i.recipient_email || '').toLowerCase(); if (!e || vistos.has(e)) return false; vistos.add(e); return true }).map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: idListaFinal, status: 'ativo' }))
+      const contatosFiltrados = todosContatos.filter(i => { const e = (i.recipient_email || '').toLowerCase(); if (!e || vistos.has(e)) return false; vistos.add(e); return true })
       
-      for (let i = 0; i < novosContatos.length; i += 500) { 
-        await supabase.from('contatos').upsert(novosContatos.slice(i, i + 500), { onConflict: 'email', ignoreDuplicates: true }) 
+      const emails = contatosFiltrados.map(i => (i.recipient_email || '').toLowerCase())
+
+      if (acaoSegmento === 'mover') {
+        // Mover: Atualiza a lista dos contatos existentes
+        for (let i = 0; i < emails.length; i += 500) {
+          const bloco = emails.slice(i, i + 500)
+          await supabase.from('contatos').update({ lista_id: idListaFinal }).in('email', bloco)
+        }
+        
+        // Insere os que ainda não existem no banco
+        const { data: existentes } = await supabase.from('contatos').select('email').in('email', emails)
+        const setExistentes = new Set(existentes?.map(e => e.email) || [])
+        const novosContatos = contatosFiltrados.filter(c => !setExistentes.has((c.recipient_email || '').toLowerCase()))
+          .map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: idListaFinal, status: 'ativo' }))
+        
+        if (novosContatos.length > 0) {
+           await supabase.from('contatos').insert(novosContatos)
+        }
+      } else {
+        // Copiar: Tenta inserir como novos registros. (Vai falhar se o banco tiver trava de e-mail único)
+        const novosContatos = contatosFiltrados.map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: idListaFinal, status: 'ativo' }))
+        try {
+          for (let i = 0; i < novosContatos.length; i += 500) {
+            await supabase.from('contatos').insert(novosContatos.slice(i, i + 500))
+          }
+        } catch (e) {
+          alert("Aviso: O banco de dados não permitiu copiar todos os contatos pois eles já existem. Eles foram adicionados à nova lista mas mantiveram apenas 1 registro.")
+        }
       }
       
-      setMsgSucesso(`✅ ${novosContatos.length} contatos adicionados à lista "${nomeListaFinal}"!`);
+      setMsgSucesso(`✅ ${emails.length} contatos inseridos na lista "${nomeListaFinal}"!`);
       setNomeNovaLista('');
       setListaExistenteId('');
       buscarListas()
@@ -693,11 +725,20 @@ export default function AutomacoesPage() {
                 
                 <div className="border-t pt-4">
                   <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Adicionar contatos a uma lista</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                  
+                  {/* NOVOS FILTROS (Agora com Engajados) */}
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
                     <button onClick={() => setTipoSegmento('enviados')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'enviados' ? 'border-blue-500 bg-blue-50' : 'hover:bg-slate-50 border-slate-200'}`}><Send className="size-4 mb-1 text-blue-600"/><p className="text-xs font-bold text-slate-800">Enviados</p><p className="text-[10px] text-slate-500 font-medium">{st.enviados} contatos</p></button>
                     <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}><Eye className="size-4 mb-1 text-emerald-600"/><p className="text-xs font-bold text-slate-800">Abridores</p><p className="text-[10px] text-slate-500 font-medium">{st.abertos} contatos</p></button>
                     <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}><MousePointerClick className="size-4 mb-1 text-purple-600"/><p className="text-xs font-bold text-slate-800">Clicadores</p><p className="text-[10px] text-slate-500 font-medium">{st.clicados} contatos</p></button>
+                    <button onClick={() => setTipoSegmento('engajados')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'engajados' ? 'border-orange-500 bg-orange-50' : 'hover:bg-slate-50 border-slate-200'}`}><Zap className="size-4 mb-1 text-orange-600"/><p className="text-xs font-bold text-slate-800">Engajados</p><p className="text-[10px] text-slate-500 font-medium">Abriu ou Clicou</p></button>
                     <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}><AlertCircle className="size-4 mb-1 text-amber-600"/><p className="text-xs font-bold text-slate-800">Não abriram</p><p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p></button>
+                  </div>
+
+                  {/* NOVAS AÇÕES (Mover ou Copiar) */}
+                  <div className="flex bg-slate-100 p-1 rounded-lg mb-3">
+                    <button onClick={() => setAcaoSegmento('mover')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${acaoSegmento === 'mover' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Mover para outra lista</button>
+                    <button onClick={() => setAcaoSegmento('copiar')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${acaoSegmento === 'copiar' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Copiar para outra lista</button>
                   </div>
                   
                   <div className="flex bg-slate-100 p-1 rounded-lg mb-3">
