@@ -48,7 +48,6 @@ export default function AutomacoesPage() {
   const [abaPainel, setAbaPainel] = useState<'campanhas' | 'configuracoes'>('campanhas')
   const [providerAtivo, setProviderAtivo] = useState('inngest')
   
-  // CONTADORES MANUAIS SIMPLIFICADOS
   const [inngestCounter, setInngestCounter] = useState(0)
   const [inputInngest, setInputInngest] = useState('')
   
@@ -80,7 +79,6 @@ export default function AutomacoesPage() {
   const [msgSucesso, setMsgSucesso] = useState('')
   const [processandoReenvio, setProcessandoReenvio] = useState(false)
 
-  // ✅ NOVOS ESTADOS PARA A FUNCIONALIDADE DE LISTA EXISTENTE
   const [modoInsercao, setModoInsercao] = useState<'nova' | 'existente'>('nova')
   const [listaExistenteId, setListaExistenteId] = useState('')
 
@@ -211,19 +209,16 @@ export default function AutomacoesPage() {
     setListaErros(data || []); setModalErros(campanha)
   }
 
-  // ✅ FUNÇÃO ATUALIZADA: Apaga da fila E remove os contatos inválidos da lista
   const limparErros = async (campanhaId: string | number) => {
     if (!confirm("⚠️ Apagar estes e-mails da fila e removê-los permanentemente da lista de contatos?")) return
     setProcessandoId(String(campanhaId))
     try {
-      // 1. Busca os e-mails que estão com erro
       const { data: emailsFalhos } = await supabase
         .from('email_queue')
         .select('recipient_email')
         .eq('campaign_id', campanhaId)
         .in('status', ['failed', 'suppressed'])
 
-      // 2. Se encontrou e-mails, remove eles da tabela de contatos
       if (emailsFalhos && emailsFalhos.length > 0) {
         const emailsParaDeletar = emailsFalhos.map(e => (e.recipient_email || '').toLowerCase()).filter(e => e)
         if (emailsParaDeletar.length > 0) {
@@ -231,7 +226,6 @@ export default function AutomacoesPage() {
         }
       }
 
-      // 3. Limpa a fila de envio
       await supabase.from('email_queue').delete().eq('campaign_id', campanhaId).in('status', ['failed', 'suppressed'])
       
       alert("✅ Contatos inválidos removidos da lista e da fila de envio.")
@@ -290,7 +284,26 @@ export default function AutomacoesPage() {
     e.preventDefault()
     if (!listaSelecionada || !assunto || !mensagem) { alert("Preencha os campos."); return }
     setEnviando(true)
-    const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ lista_id: listaSelecionada, assunto, mensagem, status: 'Em Fila', scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null }]).select().single()
+
+    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR
+    let corpoFinal = mensagem;
+    if (!mensagem.includes('descadastrar')) {
+      corpoFinal += `
+        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.5;">
+          <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">{{email}}</strong></p>
+          <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+        </div>
+      `;
+    }
+
+    const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ 
+      lista_id: listaSelecionada, 
+      assunto, 
+      mensagem: corpoFinal, // <-- SALVA O CORPO COM O RODAPÉ
+      status: 'Em Fila', 
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null 
+    }]).select().single()
+    
     if (error) { alert(`Erro: ${error.message}`); setEnviando(false); return }
     try {
       const r = await fetch('/api/disparo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campanhaId: novaCampanha.id }) })
@@ -531,6 +544,7 @@ export default function AutomacoesPage() {
                 <div className="bg-white rounded-xl border overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[250px] [&_.ql-editor]:!text-black">
                   <ReactQuill theme="snow" value={mensagem} onChange={setMensagem} modules={modulosEditor} />
                 </div>
+                <p className="text-xs text-blue-600 mt-1 font-medium">✨ O rodapé com o e-mail do cliente e o link de descadastro será adicionado automaticamente ao enviar.</p>
                 <button type="submit" disabled={enviando} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl flex justify-center gap-2">
                   {enviando ? <Loader2 className="animate-spin" /> : <Send />} {enviando ? 'Processando...' : scheduledAt ? 'Agendar Campanha' : 'Enviar Campanha'}
                 </button>
