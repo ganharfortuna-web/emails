@@ -26,9 +26,16 @@ export async function GET(request: Request) {
     const { data: conta } = await supabase.from('smtp_accounts').select('*').eq('is_active', true).limit(1).single()
     if (!conta) return NextResponse.json({ error: 'Sem conta SMTP' }, { status: 400 })
 
-    const { data: loteRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(30)
+    // 🛑 CHECA A LISTA DE SUPRESSÃO (NÃO ENVIA PARA QUEM JÁ DESCADASTROU)
+    const { data: suprimidos } = await supabase.from('suppression_list').select('email')
+    const emailsSuprimidos = new Set((suprimidos || []).map((s: any) => (s.email || '').toLowerCase()))
 
-    if (!loteRaw || loteRaw.length === 0) return NextResponse.json({ message: 'Fila vazia' })
+    const { data: loteRaw } = await supabase.from('email_queue').select('*').eq('status', 'pending').order('created_at', { ascending: true }).limit(100)
+    
+    // Filtra quem está descadastrado
+    const lote = (loteRaw || []).filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase())).slice(0, 30)
+
+    if (lote.length === 0) return NextResponse.json({ message: 'Fila vazia ou todos descadastrados' })
 
     const transporter = nodemailer.createTransport({
       pool: true, host: conta.host, port: Number(conta.port), secure: Number(conta.port) === 465,
@@ -37,7 +44,7 @@ export async function GET(request: Request) {
 
     let enviados = 0;
 
-    for (const item of loteRaw) {
+    for (const item of lote) {
       try {
         const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email || '')}`;
         
@@ -48,20 +55,27 @@ export async function GET(request: Request) {
           
         corpo = prepararHtmlEmail(corpo);
 
-        const footer = `
-          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
-            <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">${item.recipient_email}</strong></p>
-            <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="${unsubUrl}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
-          </div>
-        `;
+        corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => {
+          if (url.includes('/api/unsubscribe')) return _m;
+          return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
+        });
 
+        if (!/(descadastr|unsubscribe)/i.test(corpo)) {
+          corpo += `
+            <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+              <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">${item.recipient_email}</strong></p>
+              <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="${unsubUrl}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+            </div>
+          `;
+        }
+
+        // 🛑 ESTRUTURA HTML COMPLETA (Evita o erro ERR_INVALID_REDIRECT)
         const htmlFinal = `
           <!DOCTYPE html>
           <html>
           <head><meta charset="UTF-8"></head>
           <body style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.5;">
             ${corpo}
-            ${footer}
             <img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />
           </body>
           </html>
@@ -70,14 +84,18 @@ export async function GET(request: Request) {
         await transporter.sendMail({
           from: { name: conta.sender_name || 'Equipe', address: conta.sender_email || conta.email },
           to: item.recipient_email, subject: item.subject, html: htmlFinal,
-          headers: { 'List-Unsubscribe': `<${unsubUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+          headers: { 
+            'List-Unsubscribe': `<${unsubUrl}>`, 
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' 
+          }
         })
 
         await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id)
+        await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id)
         enviados++;
         await new Promise(resolve => setTimeout(resolve, 100));
       } catch (err: any) {
-        await supabase.from('email_queue').update({ status: 'failed', error_log: err.message }).eq('id', item.id)
+        await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id)
       }
     }
 
