@@ -13,26 +13,25 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const tokenQuery = searchParams.get('token')
   const tokenHeader = request.headers.get('authorization')?.replace('Bearer ', '')
+  const { searchParams: { get } } = new URL(request.url)
+  const campanhaIdFiltro = get('campanhaId')
 
-  const tokenRecebido = tokenHeader || tokenQuery
-  const tokenEsperado = process.env.CRON_SECRET
-
-  if (!tokenEsperado) return NextResponse.json({ error: 'CRON_SECRET não configurado' }, { status: 500 })
-  if (tokenRecebido !== tokenEsperado) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  if ((tokenHeader || tokenQuery) !== process.env.CRON_SECRET) {
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
+  const qstashUrl = process.env.QSTASH_URL
+  const qstashToken = process.env.QSTASH_TOKEN
 
   if (!supabaseUrl || !supabaseKey) return NextResponse.json({ error: 'Env vars faltando' }, { status: 500 })
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
-    // 🛑 TRAVA DE SEGURANÇA: Verifica se o QStash é o provedor ativo
     const { data: settings } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single()
-    if (settings?.active_provider !== 'qstash') {
-      return NextResponse.json({ message: 'Ignorado: Inngest está ativo.' })
-    }
+    if (settings?.active_provider !== 'qstash') return NextResponse.json({ message: 'Ignorado: Inngest ativo.' })
 
     await supabase.from('campanhas').update({ status: 'Em Fila' }).eq('status', 'Agendada').lte('scheduled_at', new Date().toISOString())
 
@@ -46,10 +45,21 @@ export async function GET(request: Request) {
     if (!contas || contas.length === 0) return NextResponse.json({ message: 'Sem contas disponíveis.' })
 
     const agora = new Date().toISOString()
-    const { data: filaRaw, error: filaError } = await supabase.from('email_queue').select('*').eq('status', 'pending').or(`next_retry_at.is.null,next_retry_at.lte.${agora}`).order('created_at', { ascending: true }).limit(30)
-    if (filaError || !filaRaw || filaRaw.length === 0) return NextResponse.json({ message: 'Nada pendente.' })
+    let query = supabase.from('email_queue').select('*').eq('status', 'pending').or(`next_retry_at.is.null,next_retry_at.lte.${agora}`).order('created_at', { ascending: true }).limit(30)
+    
+    // Se veio um ID específico, processa só ele
+    if (campanhaIdFiltro) query = query.eq('campaign_id', campanhaIdFiltro)
 
-    const fila = filaRaw.filter(item => !idsPausados.includes(item.campaign_id)).filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase())).slice(0, getBatchSize())
+    const { data: filaRaw, error: filaError } = await query
+    if (filaError || !filaRaw || filaRaw.length === 0) {
+      // Se a fila esvaziou, atualiza a campanha para Enviada
+      if (campanhaIdFiltro) {
+        await supabase.from('campanhas').update({ status: 'Enviada' }).eq('id', campanhaIdFiltro)
+      }
+      return NextResponse.json({ message: 'Nada pendente.' })
+    }
+
+    const fila = filaRaw.filter(item => !idsPausados.includes(item.campaign_id)).filter(item => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase())).slice(0, 30)
     if (fila.length === 0) return NextResponse.json({ message: 'Sem e-mails elegíveis.' })
 
     let enviados = 0
@@ -85,7 +95,6 @@ export async function GET(request: Request) {
         })
 
         await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0, smtp_account_id: contaAtual.id }).eq('id', item.id)
-        
         const { data: contaFresh } = await supabase.from('smtp_accounts').select('sent_today').eq('id', contaAtual.id).single()
         const novoSentToday = (contaFresh?.sent_today || 0) + 1
         await supabase.from('smtp_accounts').update({ sent_today: novoSentToday }).eq('id', contaAtual.id)
@@ -105,17 +114,6 @@ export async function GET(request: Request) {
           await supabase.from('email_queue').update({ status: 'pending', error_log: err.message?.slice(0, 500), bounce_type: classificacao.type, retry_count: retryCount, next_retry_at: calcularProximaTentativa(retryCount).toISOString() }).eq('id', item.id)
         } else {
           await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500), bounce_type: classificacao.type, retry_count: retryCount }).eq('id', item.id)
-          if (classificacao.action === 'block_contact') {
-            await supabase.from('contatos').update({ status: 'bounced', last_bounce_at: new Date().toISOString(), last_bounce_reason: err.message?.slice(0, 300) }).eq('email', (item.recipient_email || '').toLowerCase())
-            await supabase.from('suppression_list').upsert([{ email: (item.recipient_email || '').toLowerCase(), reason: classificacao.type === 'complaint' ? 'complaint' : 'hard_bounce', original_error: err.message?.slice(0, 300) }], { onConflict: 'email' })
-          }
-          if (classificacao.type === 'soft' || classificacao.type === 'unknown') {
-            const { data: contato } = await supabase.from('contatos').select('bounce_count').eq('email', (item.recipient_email || '').toLowerCase()).single()
-            await supabase.from('contatos').update({ bounce_count: (contato?.bounce_count || 0) + 1, last_bounce_at: new Date().toISOString() }).eq('email', (item.recipient_email || '').toLowerCase())
-          }
-          if (classificacao.action === 'disable_account') {
-            await supabase.from('smtp_accounts').update({ is_active: false }).eq('id', contaAtual.id)
-          }
         }
       }
     }
@@ -123,7 +121,18 @@ export async function GET(request: Request) {
     for (const cid of campaignIds) {
       if (idsPausados.includes(cid)) continue
       const { count } = await supabase.from('email_queue').select('*', { count: 'exact', head: true }).eq('campaign_id', cid).eq('status', 'pending')
-      await supabase.from('campanhas').update({ status: (count || 0) === 0 ? 'Enviada' : 'Enviando...' }).eq('id', cid)
+      
+      // Se for a campanha filtrada, vê se ainda tem e-mails ou se já acabou
+      await supabase.from('campanhas').update({ status: (count || 0) === 0 ? 'Enviada' : 'Enviando...', updated_at: new Date().toISOString() }).eq('id', cid)
+
+      // ✅ O SEGREDO DO LOOP: Se ainda tem e-mails pendentes, avisa o QStash para chamar o próximo lote!
+      if ((count || 0) > 0 && qstashUrl && qstashToken) {
+        await fetch(qstashUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${qstashToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}) 
+        })
+      }
     }
 
     return NextResponse.json({ success: true, processed: fila.length, enviados })
