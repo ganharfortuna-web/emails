@@ -80,6 +80,10 @@ export default function AutomacoesPage() {
   const [msgSucesso, setMsgSucesso] = useState('')
   const [processandoReenvio, setProcessandoReenvio] = useState(false)
 
+  // ✅ NOVOS ESTADOS PARA A FUNCIONALIDADE DE LISTA EXISTENTE
+  const [modoInsercao, setModoInsercao] = useState<'nova' | 'existente'>('nova')
+  const [listaExistenteId, setListaExistenteId] = useState('')
+
   const [stats, setStats] = useState<Record<string, StatsItem>>({})
 
   useEffect(() => { 
@@ -244,9 +248,9 @@ export default function AutomacoesPage() {
       }
     } catch (err) { console.log("Falhou") }
 
-    // 🛑 TRAVA DE SEGURANÇA: Se falhou e for QStash, n00e3o usa fallback do Inngest
+    // 🛑 TRAVA DE SEGURANÇA: Se falhou e for QStash, não usa fallback do Inngest
     if (providerAtivo === "qstash") {
-      alert("Erro ao acionar QStash. O watchdog tentar00e1 novamente.");
+      alert("Erro ao acionar QStash. O watchdog tentará novamente.");
       setProcessandoId(null); return;
     }
     
@@ -336,8 +340,13 @@ export default function AutomacoesPage() {
     } catch (err: any) { alert("Erro: " + err.message); setProcessandoReenvio(false) }
   }
 
+  // ✅ FUNÇÃO ATUALIZADA PARA SUPORTAR LISTA NOVA OU EXISTENTE
   const criarSegmento = async () => {
-    if (!modalDetalhes || !nomeNovaLista.trim()) return; setCriandoLista(true); setMsgSucesso('')
+    if (!modalDetalhes) return;
+    if (modoInsercao === 'nova' && !nomeNovaLista.trim()) return alert("Digite o nome da nova lista.");
+    if (modoInsercao === 'existente' && !listaExistenteId) return alert("Selecione uma lista existente.");
+    
+    setCriandoLista(true); setMsgSucesso('')
     try {
       let todosContatos: any[] = []; let page = 0; const pageSize = 1000; let hasMore = true
       while (hasMore) {
@@ -349,13 +358,29 @@ export default function AutomacoesPage() {
         const { data, error } = await query; if (error) throw error
         if (data && data.length > 0) { todosContatos = [...todosContatos, ...data]; if (data.length < pageSize) hasMore = false; else page++ } else { hasMore = false }
       }
-      if (todosContatos.length === 0) throw new Error('Nenhum contato.')
-      const { data: novaLista } = await supabase.from('listas').insert([{ nome: nomeNovaLista.trim() }]).select().single()
-      if (!novaLista) throw new Error('Erro na lista.')
+      if (todosContatos.length === 0) throw new Error('Nenhum contato encontrado para este filtro.')
+
+      let idListaFinal = listaExistenteId;
+      let nomeListaFinal = listas.find(l => l.id === listaExistenteId)?.nome;
+
+      if (modoInsercao === 'nova') {
+        const { data: novaLista } = await supabase.from('listas').insert([{ nome: nomeNovaLista.trim() }]).select().single()
+        if (!novaLista) throw new Error('Erro ao criar lista.')
+        idListaFinal = novaLista.id;
+        nomeListaFinal = novaLista.nome;
+      }
+
       const vistos = new Set<string>()
-      const novosContatos = todosContatos.filter(i => { const e = (i.recipient_email || '').toLowerCase(); if (!e || vistos.has(e)) return false; vistos.add(e); return true }).map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: novaLista.id, status: 'ativo' }))
-      for (let i = 0; i < novosContatos.length; i += 500) { await supabase.from('contatos').upsert(novosContatos.slice(i, i + 500), { onConflict: 'email', ignoreDuplicates: true }) }
-      setMsgSucesso(`✅ Lista criada com ${novosContatos.length} contatos!`); setNomeNovaLista(''); buscarListas()
+      const novosContatos = todosContatos.filter(i => { const e = (i.recipient_email || '').toLowerCase(); if (!e || vistos.has(e)) return false; vistos.add(e); return true }).map(i => ({ nome: i.recipient_name || 'Lead', email: (i.recipient_email || '').toLowerCase(), lista_id: idListaFinal, status: 'ativo' }))
+      
+      for (let i = 0; i < novosContatos.length; i += 500) { 
+        await supabase.from('contatos').upsert(novosContatos.slice(i, i + 500), { onConflict: 'email', ignoreDuplicates: true }) 
+      }
+      
+      setMsgSucesso(`✅ ${novosContatos.length} contatos adicionados à lista "${nomeListaFinal}"!`);
+      setNomeNovaLista('');
+      setListaExistenteId('');
+      buscarListas()
     } catch (e: any) { alert('Erro: ' + e.message) }
     setCriandoLista(false)
   }
@@ -363,7 +388,6 @@ export default function AutomacoesPage() {
   const todasSelecionadas = campanhas.length > 0 && selecionadas.size === campanhas.length
   const totalPages = Math.ceil(totalCampanhas / pageSizeCampanhas)
 
-  // CÁLCULO BASEADO PURAMENTE NO INPUT MANUAL
   const execucoesRestantesInngest = Math.max(0, 50000 - inngestCounter);
   const emailsRestantesInngest = Math.floor(execucoesRestantesInngest / 1.1);
 
@@ -546,7 +570,7 @@ export default function AutomacoesPage() {
                         </div>
                         
                         <div className="flex items-center gap-3 flex-wrap">
-                          <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista('') }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"><BarChart3 className="size-3" /> Desempenho</button>
+                          <button onClick={() => { setModalDetalhes(c); setMsgSucesso(''); setNomeNovaLista(''); setListaExistenteId(''); setModoInsercao('nova'); }} className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"><BarChart3 className="size-3" /> Desempenho</button>
                           <button onClick={() => reutilizarCampanha(c)} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"><Copy className="size-3" /> Reutilizar</button>
                           
                           {temTrabalhoPendente && (
@@ -638,20 +662,39 @@ export default function AutomacoesPage() {
                   <div className="bg-emerald-50 p-3 rounded-xl text-center"><Eye className="size-5 text-emerald-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.abertos}</p><p className="text-[10px] font-bold text-slate-500">ABRIRAM</p></div>
                   <div className="bg-purple-50 p-3 rounded-xl text-center"><MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.clicados}</p><p className="text-[10px] font-bold text-slate-500">CLICARAM</p></div>
                 </div>
+                
+                {/* ✅ ÁREA DE CRIAÇÃO/INSERÇÃO DE SEGMENTO ATUALIZADA */}
                 <div className="border-t pt-4">
-                  <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Criar segmento</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                  <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Adicionar contatos a uma lista</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                     <button onClick={() => setTipoSegmento('enviados')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'enviados' ? 'border-blue-500 bg-blue-50' : 'hover:bg-slate-50 border-slate-200'}`}><Send className="size-4 mb-1 text-blue-600"/><p className="text-xs font-bold text-slate-800">Enviados</p><p className="text-[10px] text-slate-500 font-medium">{st.enviados} contatos</p></button>
                     <button onClick={() => setTipoSegmento('abridores')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'abridores' ? 'border-emerald-500 bg-emerald-50' : 'hover:bg-slate-50 border-slate-200'}`}><Eye className="size-4 mb-1 text-emerald-600"/><p className="text-xs font-bold text-slate-800">Abridores</p><p className="text-[10px] text-slate-500 font-medium">{st.abertos} contatos</p></button>
                     <button onClick={() => setTipoSegmento('clicadores')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'clicadores' ? 'border-purple-500 bg-purple-50' : 'hover:bg-slate-50 border-slate-200'}`}><MousePointerClick className="size-4 mb-1 text-purple-600"/><p className="text-xs font-bold text-slate-800">Clicadores</p><p className="text-[10px] text-slate-500 font-medium">{st.clicados} contatos</p></button>
                     <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}><AlertCircle className="size-4 mb-1 text-amber-600"/><p className="text-xs font-bold text-slate-800">Não abriram</p><p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p></button>
                   </div>
+                  
+                  {/* Toggle Nova vs Existente */}
+                  <div className="flex bg-slate-100 p-1 rounded-lg mb-3">
+                    <button onClick={() => setModoInsercao('nova')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${modoInsercao === 'nova' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Criar Nova Lista</button>
+                    <button onClick={() => setModoInsercao('existente')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${modoInsercao === 'existente' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Inserir em Lista Existente</button>
+                  </div>
+
                   <div className="flex gap-2">
-                    <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm text-slate-800" />
-                    <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm">{criandoLista ? <Loader2 className="size-4 animate-spin" /> : 'Criar'}</button>
+                    {modoInsercao === 'nova' ? (
+                      <input type="text" value={nomeNovaLista} onChange={e => setNomeNovaLista(e.target.value)} placeholder="Nome da nova lista" className="flex-1 p-2 border rounded-lg text-sm text-slate-800 outline-none focus:border-indigo-500" />
+                    ) : (
+                      <select value={listaExistenteId} onChange={e => setListaExistenteId(e.target.value)} className="flex-1 p-2 border rounded-lg text-sm text-slate-800 bg-white outline-none focus:border-indigo-500">
+                        <option value="">Selecione a lista de destino...</option>
+                        {listas.map(l => <option key={l.id} value={l.id}>{l.nome} ({l.contatos[0]?.count || 0})</option>)}
+                      </select>
+                    )}
+                    <button onClick={criarSegmento} disabled={criandoLista} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm min-w-[80px] flex justify-center items-center transition-colors">
+                      {criandoLista ? <Loader2 className="size-4 animate-spin" /> : 'Salvar'}
+                    </button>
                   </div>
                   {msgSucesso && <p className="text-emerald-600 text-sm mt-2 font-bold">{msgSucesso}</p>}
                 </div>
+
                 <div className="border-t pt-4 flex gap-2">
                   <button onClick={() => { setModalDetalhes(null); abrirModalReenvio(modalDetalhes) }} className="flex-1 bg-amber-50 text-amber-700 font-bold p-3 rounded-xl border border-amber-200 text-sm flex justify-center gap-2 hover:bg-amber-100"><RotateCcw className="size-4"/> Reenviar p/ não abriram</button>
                 </div>
@@ -669,7 +712,7 @@ export default function AutomacoesPage() {
               <p className="text-amber-700 text-sm mt-1"><strong>{modalReenvio.totalNaoAbriram}</strong> contato(s) ainda não abriram.</p>
             </div>
             <div className="p-6 space-y-4">
-              <div><label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Pencil className="size-4 text-slate-500" /> Novo Assunto</label><input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)} className="w-full p-3 border rounded-xl text-slate-800" /></div>
+              <div><label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Pencil className="size-4 text-slate-500" /> Novo Assunto</label><input type="text" value={novoTitulo} onChange={e => setNovoTitulo(e.target.value)} className="w-full p-3 border rounded-xl text-slate-800 outline-none focus:border-amber-500" /></div>
             </div>
             <div className="p-6 border-t bg-slate-50 flex justify-end gap-3">
               <button onClick={() => setModalReenvio(null)} disabled={processandoReenvio} className="px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl disabled:opacity-50">Cancelar</button>
