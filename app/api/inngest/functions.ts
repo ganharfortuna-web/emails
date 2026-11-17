@@ -28,10 +28,17 @@ export const processarFilaEmails = inngest.createFunction(
       return data;
     });
 
-    const lote = await step.run("buscar-lote", async () => {
+    // 🛑 BUSCA LISTA DE SUPRESSÃO PARA NÃO ENVIAR PARA QUEM JÁ DESCADASTROU
+    const { data: suprimidos } = await supabase.from('suppression_list').select('email');
+    const emailsSuprimidos = new Set((suprimidos || []).map(s => (s.email || '').toLowerCase()));
+
+    const loteRaw = await step.run("buscar-lote", async () => {
       const { data } = await supabase.from('email_queue').select('*').eq('campaign_id', campanhaId).eq('status', 'pending').order('created_at', { ascending: true }).limit(10);
       return data || [];
     });
+
+    // Filtra o lote
+    const lote = loteRaw.filter((item: any) => !emailsSuprimidos.has((item.recipient_email || '').toLowerCase())).slice(0, 10);
 
     if (lote.length === 0) {
       await step.run("finalizar-campanha", async () => {
@@ -65,8 +72,8 @@ export const processarFilaEmails = inngest.createFunction(
               return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
             });
             
-            // ✅ RODAPÉ PADRONIZADO (PEQUENO E ELEGANTE)
-            if (!corpo.includes('descadastrar')) {
+            // Verifica se já existe a palavra descadastrar (ignorando maiúsculas/minúsculas)
+            if (!/(descadastr|unsubscribe)/i.test(corpo)) {
                corpo += `
                  <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
                    <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">${item.recipient_email}</strong></p>
@@ -79,7 +86,13 @@ export const processarFilaEmails = inngest.createFunction(
 
           await transporter.sendMail({
             from: { name: conta.sender_name || 'Equipe', address: conta.sender_email || conta.email },
-            to: item.recipient_email, subject: item.subject, html: corpo,
+            to: item.recipient_email, 
+            subject: item.subject, 
+            html: corpo,
+            headers: {
+              'List-Unsubscribe': `<${unsubUrl}>`,
+              'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+            }
           });
           await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', item.id);
           await supabase.from('smtp_accounts').update({ sent_today: (conta.sent_today || 0) + 1 }).eq('id', conta.id);

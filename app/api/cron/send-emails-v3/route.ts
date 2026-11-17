@@ -13,8 +13,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const tokenQuery = searchParams.get('token')
   const tokenHeader = request.headers.get('authorization')?.replace('Bearer ', '')
-  const { searchParams: { get } } = new URL(request.url)
-  const campanhaIdFiltro = get('campanhaId')
+  const campanhaIdFiltro = searchParams.get('campanhaId')
 
   if ((tokenHeader || tokenQuery) !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
@@ -87,8 +86,7 @@ export async function GET(request: Request) {
           return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
         });
         
-        // ✅ RODAPÉ PADRONIZADO (PEQUENO E ELEGANTE)
-        if (!htmlFinal.includes('descadastrar')) {
+        if (!/(descadastr|unsubscribe)/i.test(htmlFinal)) {
           htmlFinal += `
             <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
               <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">${item.recipient_email}</strong></p>
@@ -102,7 +100,12 @@ export async function GET(request: Request) {
       try {
         await transporter.sendMail({
           from: { name: (contaAtual.sender_name || 'Equipe').replace(/[^\x00-\x7F]/g, ''), address: contaAtual.sender_email || contaAtual.email },
-          to: item.recipient_email, subject: item.subject, html: htmlFinal, encoding: 'utf-8', headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+          to: item.recipient_email, subject: item.subject, html: htmlFinal, encoding: 'utf-8', 
+          headers: { 
+            'Content-Type': 'text/html; charset=UTF-8',
+            'List-Unsubscribe': `<${unsubUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+          },
         })
 
         await supabase.from('email_queue').update({ status: 'sent', sent_at: new Date().toISOString(), retry_count: 0, smtp_account_id: contaAtual.id }).eq('id', item.id)
