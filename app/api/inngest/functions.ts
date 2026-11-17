@@ -9,7 +9,6 @@ export const processarFilaEmails = inngest.createFunction(
     const { campanhaId } = event.data;
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     
-    // 🛑 FALLBACK DE SEGURANÇA: Se a env var falhar, usa o domínio da sua Vercel
     let baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://ganharfortuna-web.vercel.app';
     if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
 
@@ -67,13 +66,11 @@ export const processarFilaEmails = inngest.createFunction(
             
           corpo = prepararHtmlEmail(corpo);
           
-          // 🛑 Link de Tracking
           corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => {
             if (url.includes('/api/unsubscribe')) return _m;
             return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
           });
           
-          // 🛑 TRAVA DO RODAPÉ: Fora do IF para garantir que sempre adicione!
           if (!/(descadastr|unsubscribe)/i.test(corpo)) {
              corpo += `
                <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
@@ -82,13 +79,28 @@ export const processarFilaEmails = inngest.createFunction(
                </div>
              `;
           }
+          
           corpo += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`;
+
+          // 🛑 ESTRUTURA HTML COMPLETA PARA O GMAIL NÃO ESCONDER O RODAPÉ
+          const htmlFinal = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.5;">
+              ${corpo}
+            </body>
+            </html>
+          `;
 
           await transporter.sendMail({
             from: { name: conta.sender_name || 'Equipe', address: conta.sender_email || conta.email },
             to: item.recipient_email, 
             subject: item.subject, 
-            html: corpo,
+            html: htmlFinal, // <-- Enviando o HTML completo
             headers: {
               'List-Unsubscribe': `<${unsubUrl}>`,
               'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
