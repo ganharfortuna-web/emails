@@ -55,7 +55,6 @@ export async function POST(request: Request) {
         const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email || '')}`;
         const mailtoUnsub = `mailto:${conta.sender_email || conta.email}?subject=SAIR`;
 
-        // 1. Substitui as variáveis (INCLUINDO O LINK DE DESCADASTRO)
         let corpo = (item.body || '')
           .replace(/\{\{email\}\}/gi, item.recipient_email || '')
           .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
@@ -63,15 +62,11 @@ export async function POST(request: Request) {
 
         corpo = prepararHtmlEmail(corpo);
         
-        // 2. Rastreamento de cliques (MAS IGNORA O LINK DE DESCADASTRO)
         corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, _q: string, url: string) => {
-          // Se o link já for o de descadastro, não coloca o rastreador para não quebrar o redirecionamento!
           if (url.includes('/api/unsubscribe')) return _m;
-          
           return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
         });
 
-        // 3. Injeta o rodapé se não existir
         if (!corpo.includes(unsubUrl)) {
           corpo += `
             <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
@@ -109,6 +104,24 @@ export async function POST(request: Request) {
         await new Promise(resolve => setTimeout(resolve, 200));
       } catch (err: any) {
         await supabase.from('email_queue').update({ status: 'failed', error_log: err.message?.slice(0, 500) }).eq('id', item.id)
+      }
+    }
+
+    // 🛑 TRAVA DE FINALIZAÇÃO: Verifica se a fila da campanha zerou
+    const campanhasAfetadas = Array.from(new Set(lote.map((i: any) => i.campaign_id)));
+    
+    for (const campId of campanhasAfetadas) {
+      const { count: restantes } = await supabase
+        .from('email_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', campId)
+        .eq('status', 'pending');
+
+      if ((restantes || 0) === 0) {
+        await supabase
+          .from('campanhas')
+          .update({ status: 'Enviada' })
+          .eq('id', campId);
       }
     }
 
