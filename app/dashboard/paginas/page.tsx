@@ -135,12 +135,23 @@ export default function PaginasBuilderPage() {
 
     const slugFormatado = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 
+    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR
+    let corpoFinal = corpo;
+    if (!corpo.includes('descadastrar')) {
+      corpoFinal += `
+        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 12px; color: #64748b;">
+          <p>Este e-mail foi enviado para: <strong>{{email}}</strong></p>
+          <p>Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+        </div>
+      `;
+    }
+
     const payload = {
       titulo, subtitulo, slug: slugFormatado, lista_id: listaId,
-      email_assunto: assunto, email_corpo: corpo,
+      email_assunto: assunto, email_corpo: corpoFinal, // <-- USA O CORPO COM RODAPÉ
       bg_color: bgColor, button_color: btnColor, hero_image_url: heroImageUrl, layout_type: layoutType,
       thank_you_type: thankYouType,
-      redirect_url: thankYouType === 'external' ? redirectUrl : '', // Salva apenas se for externo
+      redirect_url: thankYouType === 'external' ? redirectUrl : '',
       thank_you_title: thankYouTitle,
       thank_you_text: thankYouText,
       thank_you_whatsapp: thankYouWhatsapp,
@@ -267,6 +278,7 @@ export default function PaginasBuilderPage() {
               <div className="bg-white rounded-xl border border-slate-200 overflow-visible [&_.ql-toolbar]:border-none [&_.ql-toolbar]:border-b [&_.ql-toolbar]:bg-slate-50 [&_.ql-container]:border-none [&_.ql-editor]:min-h-[150px] [&_.ql-editor]:!text-black">
                 <ReactQuill theme="snow" value={corpo} onChange={setCorpo} modules={modulosEditor} />
               </div>
+              <p className="text-xs text-blue-600 mt-2 font-medium">✨ O rodapé com o e-mail do cliente e o link de descadastro será adicionado automaticamente ao salvar.</p>
             </div>
           </div>
 

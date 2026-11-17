@@ -11,10 +11,8 @@ export default function ListasPage() {
   const [carregando, setCarregando] = useState(true)
   const [processandoId, setProcessandoId] = useState<string | null>(null)
   
-  // ✅ ESTADO DA ABA (Ativas ou Lixeira)
   const [abaAtiva, setAbaAtiva] = useState<'ativas' | 'lixeira'>('ativas')
 
-  // Estados para criar/editar
   const [modalAberto, setModalAberto] = useState(false)
   const [editandoId, setEditandoId] = useState<string | null>(null)
   const [nomeLista, setNomeLista] = useState('')
@@ -29,7 +27,6 @@ export default function ListasPage() {
     
     let query = supabase.from('listas').select('*, contatos(count)').order('created_at', { ascending: false })
 
-    // Filtra baseado na aba
     if (abaAtiva === 'ativas') {
       query = query.is('deleted_at', null)
     } else {
@@ -42,19 +39,16 @@ export default function ListasPage() {
     setCarregando(false)
   }
 
-  // ✅ MOVER PARA A LIXEIRA (Soft Delete)
   const moverParaLixeira = async (id: string, nome: string) => {
     if (!confirm(`Deseja mover a lista "${nome}" para a Lixeira?\n\nOs contatos NÃO serão apagados.`)) return
     
     setProcessandoId(id)
-    // Apenas preenche a data de exclusão. A lista some da aba "Ativas" mas fica na Lixeira.
     await supabase.from('listas').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     
     carregarListas()
     setProcessandoId(null)
   }
 
-  // ✅ RESTAURAR DA LIXEIRA
   const restaurarLista = async (id: string) => {
     setProcessandoId(id)
     await supabase.from('listas').update({ deleted_at: null }).eq('id', id)
@@ -62,14 +56,12 @@ export default function ListasPage() {
     setProcessandoId(null)
   }
 
-  // ✅ EXCLUIR DEFINITIVAMENTE (Desvincula contatos em vez de apagar)
   const excluirDefinitivo = async (id: string, nome: string) => {
     const msg = `🚨 EXCLUSÃO DEFINITIVA 🚨\n\nVocê está prestes a apagar a lista "${nome}" para sempre.\n\n✅ BOM: Os contatos NÃO serão apagados, eles apenas ficarão "Sem Lista".\n❌ RUIM: As campanhas vinculadas a esta lista serão apagadas do histórico.\n\nTem certeza?`
     if (!confirm(msg)) return
     
     setProcessandoId(id)
     try {
-      // 1. Buscar as campanhas que usam essa lista para apagar a fila de envios
       const { data: campanhas } = await supabase.from('campanhas').select('id').eq('lista_id', id)
       const campanhaIds = campanhas?.map(c => c.id) || []
 
@@ -77,14 +69,8 @@ export default function ListasPage() {
         await supabase.from('email_queue').delete().in('campaign_id', campanhaIds)
       }
 
-      // 2. Apagar as campanhas (histórico)
       await supabase.from('campanhas').delete().eq('lista_id', id)
-
-      // 3. DESVINCULAR OS CONTATOS (AQUI ESTÁ A MÁGICA QUE VOCÊ PEDIU)
-      // Eles não são deletados, apenas o lista_id deles vira NULL
       await supabase.from('contatos').update({ lista_id: null }).eq('lista_id', id)
-
-      // 4. Apagar a lista definitivamente
       await supabase.from('listas').delete().eq('id', id)
 
       carregarListas()
@@ -139,7 +125,6 @@ export default function ListasPage() {
         )}
       </div>
 
-      {/* ✅ SELETOR DE ABAS (ATIVAS / LIXEIRA) */}
       <div className="flex gap-2 border-b border-slate-200">
         <button 
           onClick={() => setAbaAtiva('ativas')}
@@ -155,7 +140,6 @@ export default function ListasPage() {
         </button>
       </div>
 
-      {/* GRID DE LISTAS */}
       {carregando ? (
         <div className="flex justify-center py-12"><Loader2 className="size-8 animate-spin text-blue-500" /></div>
       ) : listas.length === 0 ? (
@@ -229,7 +213,6 @@ export default function ListasPage() {
         </div>
       )}
 
-      {/* MODAL DE CRIAR/EDITAR */}
       {modalAberto && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">

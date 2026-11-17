@@ -136,7 +136,6 @@ export default function AutomacoesPage() {
     const isInngest = tipo === 'inngest';
     const inputTexto = isInngest ? inputInngest : inputQstash;
     
-    // Remove tudo que não for número (pontos, vírgulas)
     const textoLimpo = inputTexto.replace(/\D/g, '')
     const valor = parseInt(textoLimpo, 10) || 0;
     
@@ -212,12 +211,31 @@ export default function AutomacoesPage() {
     setListaErros(data || []); setModalErros(campanha)
   }
 
+  // ✅ FUNÇÃO ATUALIZADA: Apaga da fila E remove os contatos inválidos da lista
   const limparErros = async (campanhaId: string | number) => {
-    if (!confirm("⚠️ Apagar estes e-mails da fila?")) return
+    if (!confirm("⚠️ Apagar estes e-mails da fila e removê-los permanentemente da lista de contatos?")) return
     setProcessandoId(String(campanhaId))
     try {
+      // 1. Busca os e-mails que estão com erro
+      const { data: emailsFalhos } = await supabase
+        .from('email_queue')
+        .select('recipient_email')
+        .eq('campaign_id', campanhaId)
+        .in('status', ['failed', 'suppressed'])
+
+      // 2. Se encontrou e-mails, remove eles da tabela de contatos
+      if (emailsFalhos && emailsFalhos.length > 0) {
+        const emailsParaDeletar = emailsFalhos.map(e => (e.recipient_email || '').toLowerCase()).filter(e => e)
+        if (emailsParaDeletar.length > 0) {
+           await supabase.from('contatos').delete().in('email', emailsParaDeletar)
+        }
+      }
+
+      // 3. Limpa a fila de envio
       await supabase.from('email_queue').delete().eq('campaign_id', campanhaId).in('status', ['failed', 'suppressed'])
-      setModalErros(null); buscarCampanhas(true); carregarStats()
+      
+      alert("✅ Contatos inválidos removidos da lista e da fila de envio.")
+      setModalErros(null); buscarCampanhas(true); carregarStats(); buscarListas()
     } catch (err: any) { alert("Erro: " + err.message) }
     setProcessandoId(null)
   }
@@ -248,7 +266,6 @@ export default function AutomacoesPage() {
       }
     } catch (err) { console.log("Falhou") }
 
-    // 🛑 TRAVA DE SEGURANÇA: Se falhou e for QStash, não usa fallback do Inngest
     if (providerAtivo === "qstash") {
       alert("Erro ao acionar QStash. O watchdog tentará novamente.");
       setProcessandoId(null); return;
@@ -340,7 +357,6 @@ export default function AutomacoesPage() {
     } catch (err: any) { alert("Erro: " + err.message); setProcessandoReenvio(false) }
   }
 
-  // ✅ FUNÇÃO ATUALIZADA PARA SUPORTAR LISTA NOVA OU EXISTENTE
   const criarSegmento = async () => {
     if (!modalDetalhes) return;
     if (modoInsercao === 'nova' && !nomeNovaLista.trim()) return alert("Digite o nome da nova lista.");
@@ -632,7 +648,7 @@ export default function AutomacoesPage() {
               ))}
             </div>
             <div className="p-6 border-t bg-slate-50 flex justify-between items-center shrink-0">
-              <button onClick={() => limparErros(modalErros.id)} disabled={processandoId === String(modalErros.id)} className="px-5 py-2.5 font-bold text-red-600 hover:bg-red-100 rounded-xl flex items-center gap-2"><Trash2 className="size-4" /> Apagar</button>
+              <button onClick={() => limparErros(modalErros.id)} disabled={processandoId === String(modalErros.id)} className="px-5 py-2.5 font-bold text-red-600 hover:bg-red-100 rounded-xl flex items-center gap-2"><Trash2 className="size-4" /> Apagar Contatos Inválidos</button>
               <div className="flex gap-2">
                 <button onClick={() => setModalErros(null)} className="px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-200 rounded-xl">Fechar</button>
                 <button onClick={() => retentarErros(modalErros.id)} disabled={processandoId === String(modalErros.id)} className="px-6 py-2.5 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl flex items-center gap-2"><RefreshCcw className="size-4" /> Tentar Novamente</button>
@@ -663,7 +679,6 @@ export default function AutomacoesPage() {
                   <div className="bg-purple-50 p-3 rounded-xl text-center"><MousePointerClick className="size-5 text-purple-600 mx-auto mb-1" /><p className="text-2xl font-black text-slate-900">{st.clicados}</p><p className="text-[10px] font-bold text-slate-500">CLICARAM</p></div>
                 </div>
                 
-                {/* ✅ ÁREA DE CRIAÇÃO/INSERÇÃO DE SEGMENTO ATUALIZADA */}
                 <div className="border-t pt-4">
                   <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-slate-800"><Users className="size-4 text-indigo-600"/> Adicionar contatos a uma lista</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
@@ -673,7 +688,6 @@ export default function AutomacoesPage() {
                     <button onClick={() => setTipoSegmento('nao_abriram')} className={`p-2 border rounded-xl text-left transition-colors ${tipoSegmento === 'nao_abriram' ? 'border-amber-500 bg-amber-50' : 'hover:bg-slate-50 border-slate-200'}`}><AlertCircle className="size-4 mb-1 text-amber-600"/><p className="text-xs font-bold text-slate-800">Não abriram</p><p className="text-[10px] text-slate-500 font-medium">{Math.max(st.enviados - st.abertos, 0)} contatos</p></button>
                   </div>
                   
-                  {/* Toggle Nova vs Existente */}
                   <div className="flex bg-slate-100 p-1 rounded-lg mb-3">
                     <button onClick={() => setModoInsercao('nova')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${modoInsercao === 'nova' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Criar Nova Lista</button>
                     <button onClick={() => setModoInsercao('existente')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${modoInsercao === 'existente' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Inserir em Lista Existente</button>
