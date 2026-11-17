@@ -17,7 +17,6 @@ export async function POST(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   try {
-    // 🛑 TRAVA DE SEGURANÇA
     const { data: settings } = await supabase.from('system_settings').select('active_provider').eq('id', 1).single()
     if (settings?.active_provider !== 'inngest') {
       return NextResponse.json({ error: 'Ignorado: QStash está ativo.' }, { status: 400 })
@@ -78,12 +77,25 @@ export async function POST(request: Request) {
     })
 
     for (const item of fila) {
-      let corpoPersonalizado = (item.body || '').replace(/\{\{email\}\}/gi, item.recipient_email || '').replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+      const unsubUrl = `${baseUrl}/api/unsubscribe?id=${item.id}&email=${encodeURIComponent(item.recipient_email || '')}`;
+      let corpoPersonalizado = (item.body || '')
+        .replace(/\{\{email\}\}/gi, item.recipient_email || '')
+        .replace(/\{\{nome\}\}/gi, item.recipient_name || 'Cliente')
+        .replace(/\{\{unsubscribe_link\}\}/gi, unsubUrl);
+        
       corpoPersonalizado = prepararHtmlEmail(corpoPersonalizado)
 
       let htmlFinal = corpoPersonalizado
       if (baseUrl) {
-        htmlFinal = htmlFinal.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`)
+        // ✅ TRAVA: Ignora a reescrita se o link for de descadastro
+        htmlFinal = htmlFinal.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => {
+          if (url.includes('/api/unsubscribe')) return _m;
+          return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
+        });
+        
+        if (!htmlFinal.includes('descadastrar')) {
+          htmlFinal += `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`;
+        }
         htmlFinal += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" alt="" />`
       }
 
