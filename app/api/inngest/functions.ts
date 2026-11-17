@@ -60,14 +60,19 @@ export const processarFilaEmails = inngest.createFunction(
           corpo = prepararHtmlEmail(corpo);
           
           if (baseUrl) {
-            // ✅ TRAVA: Ignora a reescrita se o link for de descadastro
             corpo = corpo.replace(/href=(["'])(https?:\/\/[^"']+)\1/gi, (_m: string, quote: string, url: string) => {
               if (url.includes('/api/unsubscribe')) return _m;
               return `href="${baseUrl}/api/track/click?id=${item.id}&url=${encodeURIComponent(url)}"`;
             });
             
+            // ✅ RODAPÉ PADRONIZADO (PEQUENO E ELEGANTE)
             if (!corpo.includes('descadastrar')) {
-               corpo += `<hr style="margin:32px 0 16px;border:none;border-top:1px solid #e2e8f0;" /><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0 0 8px 0;">Este e-mail foi enviado para <strong style="color:#64748b;">${item.recipient_email}</strong></p><p style="font-family:Arial,sans-serif;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0;">Não quer mais receber? <a href="${unsubUrl}" style="color:#64748b;text-decoration:underline;">Clique aqui para descadastrar</a>.</p>`;
+               corpo += `
+                 <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+                   <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">${item.recipient_email}</strong></p>
+                   <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="${unsubUrl}" clicktracking="off" data-msys-clicktrack="0" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
+                 </div>
+               `;
             }
             corpo += `<img src="${baseUrl}/api/track/open?id=${item.id}" width="1" height="1" style="display:none;" />`;
           }

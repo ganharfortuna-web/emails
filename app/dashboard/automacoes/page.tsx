@@ -285,21 +285,11 @@ export default function AutomacoesPage() {
     if (!listaSelecionada || !assunto || !mensagem) { alert("Preencha os campos."); return }
     setEnviando(true)
 
-    // ✅ INSERE O RODAPÉ AUTOMÁTICO SE NÃO EXISTIR (PADRONIZADO)
-    let corpoFinal = mensagem;
-    if (!mensagem.includes('descadastrar')) {
-      corpoFinal += `
-        <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-family: Arial, sans-serif; font-size: 11px; color: #94a3b8; line-height: 1.6;">
-          <p style="margin: 0 0 8px 0;">Este e-mail foi enviado para: <strong style="color: #64748b;">{{email}}</strong></p>
-          <p style="margin: 0;">Não quer mais receber nossos e-mails? <a href="{{unsubscribe_link}}" style="color: #64748b; text-decoration: underline;">Clique aqui para descadastrar</a>.</p>
-        </div>
-      `;
-    }
-
+    // O backend agora vai injetar o rodapé formatado, então salvamos o texto puro.
     const { data: novaCampanha, error } = await supabase.from('campanhas').insert([{ 
       lista_id: listaSelecionada, 
       assunto, 
-      mensagem: corpoFinal, // <-- SALVA O CORPO COM O RODAPÉ
+      mensagem: mensagem,
       status: 'Em Fila', 
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null 
     }]).select().single()
@@ -443,7 +433,6 @@ export default function AutomacoesPage() {
             <p className="text-sm text-slate-500 mb-6">Digite o valor exato que aparece no painel do seu provedor e salve. O sistema calcula quantos envios ainda restam.</p>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* CARD INNGEST */}
               <div className="bg-slate-50 border rounded-xl p-6">
                 <p className="text-sm font-bold text-slate-500 mb-1">Uso do Inngest (Limite: 50.000)</p>
                 <p className="text-4xl font-black text-slate-900 mb-4">{inngestCounter.toLocaleString('pt-BR')}</p>
@@ -473,7 +462,6 @@ export default function AutomacoesPage() {
                 </div>
               </div>
 
-              {/* CARD QSTASH */}
               <div className="bg-slate-50 border rounded-xl p-6">
                 <p className="text-sm font-bold text-slate-500 mb-1">Uso do QStash (Limite: 30.000)</p>
                 <p className="text-4xl font-black text-slate-900 mb-4">{qstashCounter.toLocaleString('pt-BR')}</p>
@@ -645,7 +633,6 @@ export default function AutomacoesPage() {
         </div>
       )}
 
-      {/* MODAIS (Erros, Desempenho, Reenvio) */}
       {modalErros && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 overflow-hidden flex flex-col max-h-[80vh]">
